@@ -60,6 +60,7 @@ export default function ClassWorkspace() {
   const [keywordsInput, setKeywordsInput] = useState('');
   const [isCreatingAssignment, setIsCreatingAssignment] = useState(false);
   const [creationStep, setCreationStep] = useState(''); // 'db_creation', 'slide_duplication', 'done'
+  const [duplicationProgress, setDuplicationProgress] = useState(null); // { current, total, studentName, studentNumber, percent }
   const [selectedStudentNames, setSelectedStudentNames] = useState([]);
 
   // Auto-populate target recipients when assignment modal opens
@@ -229,12 +230,15 @@ export default function ClassWorkspace() {
 
     setIsCreatingAssignment(true);
     setCreationStep('db_creation');
+    setDuplicationProgress({ current: 0, total: targetStudents.length, studentName: '', studentNumber: '', percent: 0 });
 
     try {
       const spreadsheetId = await createDatabaseSpreadsheet(className, assignmentName.trim());
       
       setCreationStep('slide_duplication');
-      await duplicateSlideForStudents(templateId, targetStudents, spreadsheetId);
+      await duplicateSlideForStudents(templateId, targetStudents, spreadsheetId, (prog) => {
+        setDuplicationProgress(prog);
+      });
 
       if (parsedKeywords.length > 0) {
         localStorage.setItem(`keywords_${spreadsheetId}`, JSON.stringify(parsedKeywords));
@@ -727,19 +731,60 @@ export default function ClassWorkspace() {
         </div>
       )}
 
-      {/* Assignment Distribution Loader */}
+      {/* Assignment Distribution Loader with Live Student Progress */}
       {isCreatingAssignment && (
         <div className="custom-modal-backdrop">
-          <div className="custom-modal-content" style={{ textAlign: 'center', padding: '2.5rem 1.5rem', maxWidth: '400px' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '1.25rem', animation: 'spin 2.5s linear infinite' }}>🟡</div>
-            <h3 style={{ fontWeight: 800, fontSize: '1.25rem', marginBottom: '0.5rem' }}>수업 과제 배부 중...</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
-              구글 드라이브 내에 데이터베이스를 구축하고 개별 학생 슬라이드를 복사하고 있습니다.
+          <div className="custom-modal-content" style={{ textAlign: 'center', padding: '2.5rem 1.75rem', maxWidth: '440px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', color: 'var(--brand-green-dark)', animation: 'spin 1.5s linear infinite', marginBottom: '1.25rem' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="2" x2="12" y2="6" />
+                <line x1="12" y1="18" x2="12" y2="22" />
+                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                <line x1="2" y1="12" x2="6" y2="12" />
+                <line x1="18" y1="12" x2="22" y2="12" />
+                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+              </svg>
+            </div>
+            <h3 style={{ fontWeight: 900, fontSize: '1.3rem', color: 'var(--text-main)', margin: '0 0 0.5rem 0' }}>
+              수업 과제 배부 중...
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: '1.5', margin: '0 0 1.25rem 0' }}>
+              구글 드라이브 내에 데이터베이스를 구축하고 학생별 개인 슬라이드를 복사하고 있습니다.
             </p>
-            <div style={{ backgroundColor: '#fffbeb', borderRadius: '999px', padding: '0.5rem', border: '1px solid #fef3c7', fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-green-dark)' }}>
-              {creationStep === 'db_creation' && '구글 스프레드시트 데이터베이스 생성 중...'}
-              {creationStep === 'slide_duplication' && '학생별 개인 구글 슬라이드 사본 배부 및 공유 설정 중...'}
-              {creationStep === 'done' && '생성 완료! 대시보드로 이동합니다.'}
+
+            {/* Live Progress Bar */}
+            {creationStep === 'slide_duplication' && duplicationProgress && (
+              <div style={{ marginBottom: '1.25rem', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 800, color: 'var(--brand-green-dark)', marginBottom: '0.35rem' }}>
+                  <span>
+                    [{duplicationProgress.current} / {duplicationProgress.total}명] {duplicationProgress.studentNumber ? `${duplicationProgress.studentNumber}번 ` : ''}{duplicationProgress.studentName} 복사 중
+                  </span>
+                  <span>{duplicationProgress.percent}%</span>
+                </div>
+                <div style={{ width: '100%', height: '8px', backgroundColor: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div 
+                    style={{ 
+                      width: `${duplicationProgress.percent}%`, 
+                      height: '100%', 
+                      backgroundColor: 'var(--brand-green-dark)', 
+                      borderRadius: '999px',
+                      transition: 'width 0.25s ease-out' 
+                    }} 
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={{ backgroundColor: '#ecfdf5', borderRadius: '8px', padding: '0.65rem 0.85rem', border: '1px solid #a7f3d0', fontSize: '0.85rem', fontWeight: 800, color: '#065f46' }}>
+              {creationStep === 'db_creation' && '1단계: 구글 스프레드시트 데이터베이스 생성 중...'}
+              {creationStep === 'slide_duplication' && (
+                duplicationProgress?.studentName 
+                  ? `2단계: ${duplicationProgress.studentNumber ? `${duplicationProgress.studentNumber}번 ` : ''}${duplicationProgress.studentName} 학생 슬라이드 사본 배부 중...`
+                  : '2단계: 학생별 개인 구글 슬라이드 사본 배부 및 공유 설정 중...'
+              )}
+              {creationStep === 'done' && '3단계: 생성 완료! 대시보드로 이동합니다.'}
             </div>
           </div>
         </div>

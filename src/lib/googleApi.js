@@ -201,15 +201,27 @@ export async function createDatabaseSpreadsheet(className, assignmentName) {
 /**
  * 2. 슬라이드 템플릿 복사 및 권한 부여
  */
-export async function duplicateSlideForStudents(templateId, studentsList, spreadsheetId) {
+export async function duplicateSlideForStudents(templateId, studentsList, spreadsheetId, onProgress) {
   if (!getAccessToken()) throw new Error('Not authenticated');
 
   const studentsResults = [];
+  const total = studentsList.length;
 
-  for (const student of studentsList) {
+  for (let i = 0; i < total; i++) {
+    const student = studentsList[i];
     const studentName = student.name;
     const studentNum = student.number || '';
     
+    if (onProgress) {
+      onProgress({
+        current: i + 1,
+        total: total,
+        studentName: studentName,
+        studentNumber: studentNum,
+        percent: Math.round((i / total) * 100)
+      });
+    }
+
     // 1) 사본 만들기 (교사 드라이브 내)
     const copyResponse = await window.gapi.client.drive.files.copy({
       fileId: templateId,
@@ -236,6 +248,16 @@ export async function duplicateSlideForStudents(templateId, studentsList, spread
       slideId: newSlideId,
       slideUrl: newSlideUrl
     });
+
+    if (onProgress) {
+      onProgress({
+        current: i + 1,
+        total: total,
+        studentName: studentName,
+        studentNumber: studentNum,
+        percent: Math.round(((i + 1) / total) * 100)
+      });
+    }
   }
 
   // 3) 스프레드시트에 기입

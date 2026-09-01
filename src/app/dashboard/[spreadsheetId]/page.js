@@ -396,15 +396,20 @@ export default function Dashboard() {
                 fields: 'revisions(id,modifiedTime)'
               });
               const revisions = revResp.result.revisions || [];
-              if (revisions.length === 0) return;
+              // Ignore if there is only the initial file copy creation revision (length <= 1)
+              if (revisions.length <= 1) return;
+
+              // If student has never connected and has no prior logs, ignore template creation
+              const studentLogs = loadedLogs.filter(l => l.name === student.name);
+              if (student.status === 'disconnected' && studentLogs.length === 0) return;
 
               // Extracted times from already registered logs
-              const existingTimes = loadedLogs
-                .filter(l => l.name === student.name)
-                .map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
+              const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
 
               // Detect offline edits that are not captured in the spreadsheet logs within a 3-minute window
-              const newRevisions = revisions.filter(rev => {
+              // Skip the first revision (index 0) which is just the template file copy
+              const userRevisions = revisions.slice(1);
+              const newRevisions = userRevisions.filter(rev => {
                 const revTimeMinutes = Math.round(new Date(rev.modifiedTime).getTime() / (60 * 1000));
                 return !existingTimes.some(et => Math.abs(et - revTimeMinutes) <= 3);
               });
@@ -412,10 +417,9 @@ export default function Dashboard() {
               if (newRevisions.length === 0) return;
 
               // Linearly interpolate offline character changes
-              const studentLogs = loadedLogs.filter(l => l.name === student.name);
-              const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : 0;
+              const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : student.charCount;
               const endChar = student.charCount;
-              const charDiff = endChar - startChar;
+              const charDiff = Math.max(endChar - startChar, 0);
               const step = newRevisions.length > 0 ? charDiff / newRevisions.length : 0;
 
               newRevisions.forEach((rev, idx) => {
@@ -519,14 +523,39 @@ export default function Dashboard() {
           const charDiff = stats.charCount - prevCharCount;
           const slideDiff = stats.slideCount - prevSlideCount;
           
-          // Determine if slide has been interacted with (via Google Slides revisionId change)
-          // Avoid triggering false-positive edit logs on first tick (prevRevisionId is empty)
-          const isRevisionChanged = prevRevisionId && stats.revisionId ? (stats.revisionId !== prevRevisionId) : false;
-          
-          let nextStatus = student.status;
-          let nextLastActive = student.lastActiveAt;
+          // Handle disconnected students who haven't started working yet
+          if (prevStatus === 'disconnected') {
+            // First tick: capture initial template baseline without creating fake activity log
+            if (!prevRevisionId) {
+              student.charCount = stats.charCount;
+              student.slideCount = stats.slideCount;
+              student.imageCount = stats.imageCount;
+              student.blankSlideCount = stats.blankSlideCount;
+              student.keywordsUsed = stats.keywordsUsed;
+              student.revisionId = stats.revisionId;
+              student.fullText = stats.fullText;
+              student.status = 'disconnected';
+              return;
+            }
 
-          // 1) Actual interaction detected
+            // Revision and contents are unchanged -> stay disconnected
+            if (!isRevisionChanged && charDiff === 0 && slideDiff === 0 && stats.imageCount === prevImageCount) {
+              student.charCount = stats.charCount;
+              student.slideCount = stats.slideCount;
+              student.imageCount = stats.imageCount;
+              student.blankSlideCount = stats.blankSlideCount;
+              student.keywordsUsed = stats.keywordsUsed;
+              student.status = 'disconnected';
+              return;
+            }
+
+            // Actual interaction detected on previously disconnected student!
+            nextStatus = 'active';
+            nextLastActive = now.toISOString();
+            stateChanged = true;
+          }
+
+          // 1) Actual interaction detected for active/connected students
           if (isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount) {
             nextStatus = 'active';
             nextLastActive = now.toISOString();
@@ -565,13 +594,6 @@ export default function Dashboard() {
             } else {
               nextStatus = 'active';
             }
-          }
-
-          // 3) Reconnected
-          if (prevStatus === 'disconnected') {
-            nextStatus = 'active';
-            nextLastActive = now.toISOString();
-            stateChanged = true;
           }
 
           let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
