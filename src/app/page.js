@@ -827,6 +827,8 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
       {/* Direct Google API Config Modal */}
       {showConfigModal && (
         <div className="custom-modal-backdrop" onClick={() => setShowConfigModal(false)}>
