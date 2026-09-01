@@ -805,8 +805,9 @@ export default function ClassWorkspace() {
             <h3 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#b91c1c', margin: '0 0 0.5rem 0' }}>
               과제를 삭제하시겠습니까?
             </h3>
-            <p style={{ fontSize: '0.88rem', color: '#475569', lineHeight: '1.55', margin: '0 0 1.5rem 0' }}>
-              <strong>[{assignmentToDelete.name}]</strong> 과제의 실시간 DB와 <strong>배부된 모든 학생의 구글 슬라이드 사본 파일들</strong>이 구글 드라이브 휴지통으로 함께 이동됩니다.
+            <p style={{ fontSize: '0.92rem', color: '#475569', lineHeight: '1.6', margin: '0 0 1.5rem 0' }}>
+              <strong>[{assignmentToDelete.name}]</strong> 과제가 삭제되며,<br />
+              학생들에게 배부된 구글 슬라이드도 함께 삭제됩니다.
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
               <button 
