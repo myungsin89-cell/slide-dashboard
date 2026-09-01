@@ -734,11 +734,38 @@ export async function deleteClassRoster(rosterName) {
 }
 
 /**
- * 13. 수업 과제 삭제 (DB 스프레드시트 파일 휴지통 이동)
+ * 13. 수업 과제 삭제 (학생별 구글 슬라이드 사본 파일들과 DB 스프레드시트를 모두 구글 드라이브 휴지통으로 이동)
  */
 export async function deleteAssignment(spreadsheetId) {
   if (!getAccessToken()) throw new Error('Not authenticated');
 
+  try {
+    // 1) 스프레드시트에서 학생별 슬라이드 ID 목록 조회
+    const resp = await window.gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetId,
+      range: 'students!C2:C200' // C열: slide_id
+    });
+    const rows = resp.result.values || [];
+    const slideIds = rows.map(r => r[0]).filter(Boolean);
+
+    // 2) 모든 학생의 구글 슬라이드 사본 파일들을 구글 드라이브 휴지통으로 이동
+    await Promise.all(
+      slideIds.map(async (slideId) => {
+        try {
+          await window.gapi.client.drive.files.update({
+            fileId: slideId,
+            resource: { trashed: true }
+          });
+        } catch (slideErr) {
+          console.warn(`Failed to trash slide ${slideId}:`, slideErr);
+        }
+      })
+    );
+  } catch (err) {
+    console.warn('Failed to fetch student slide IDs before deleting assignment:', err);
+  }
+
+  // 3) 과제 DB 스프레드시트 파일 휴지통 이동
   await window.gapi.client.drive.files.update({
     fileId: spreadsheetId,
     resource: { trashed: true }
