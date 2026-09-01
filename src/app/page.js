@@ -8,7 +8,9 @@ import {
   signOutTeacher,
   fetchClassRosters,
   saveClassRoster,
-  deleteClassRoster
+  deleteClassRoster,
+  getGoogleConfig,
+  saveGoogleConfig
 } from '@/lib/googleApi';
 
 export default function Home() {
@@ -17,6 +19,11 @@ export default function Home() {
   // SDK & Auth States
   const [sdkStatus, setSdkStatus] = useState('loading'); // 'loading', 'ready', 'config_missing', 'error'
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Manual Google API Config Modal
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [inputClientId, setInputClientId] = useState('');
+  const [inputApiKey, setInputApiKey] = useState('');
   
   // Class Rosters List
   const [rosterList, setRosterList] = useState([]);
@@ -421,7 +428,7 @@ export default function Home() {
         )}
 
         {sdkStatus === 'config_missing' && (
-          <div className="card" style={{ textAlign: 'center', padding: '3rem', maxWidth: '500px', margin: '3rem auto', borderColor: '#fca5a5', backgroundColor: '#fff5f5' }}>
+          <div className="card" style={{ textAlign: 'center', padding: '3rem', maxWidth: '520px', margin: '3rem auto', borderColor: '#fca5a5', backgroundColor: '#fff5f5' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', backgroundColor: '#fee2e2', color: '#b91c1c', marginBottom: '1.25rem' }}>
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -429,10 +436,24 @@ export default function Home() {
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
             </div>
-            <h2 style={{ fontWeight: 800, fontSize: '1.4rem', color: '#b91c1c' }}>API 자격 증명이 누락되었습니다</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.75rem' }}>
-              프로젝트 루트의 `.env.local` 파일 내에 구글 Client ID 및 API Key가 정상 기입되었는지 확인해 주세요.
+            <h2 style={{ fontWeight: 800, fontSize: '1.4rem', color: '#b91c1c', margin: '0 0 0.5rem 0' }}>API 자격 증명이 필요합니다</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.5', margin: '0 0 1.5rem 0' }}>
+              Vercel 환경 변수가 로드되지 않았거나 설정되지 않았습니다.<br />
+              아래 버튼을 눌러 구글 Client ID와 API Key를 직접 입력하시면 즉시 구동됩니다.
             </p>
+            <button 
+              type="button"
+              className="btn-primary"
+              style={{ padding: '0.65rem 1.25rem', fontSize: '0.9rem', fontWeight: 800 }}
+              onClick={() => {
+                const conf = getGoogleConfig();
+                setInputClientId(conf.clientId || '');
+                setInputApiKey(conf.apiKey || '');
+                setShowConfigModal(true);
+              }}
+            >
+              🔑 구글 API 자격 증명 직접 등록하기
+            </button>
           </div>
         )}
 
@@ -804,6 +825,77 @@ export default function Home() {
                 확인
               </button>
             </div>
+          </div>
+        </div>
+      {/* Direct Google API Config Modal */}
+      {showConfigModal && (
+        <div className="custom-modal-backdrop" onClick={() => setShowConfigModal(false)}>
+          <div className="custom-modal-content" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              구글 API 자격 증명 직접 등록
+            </div>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const cId = inputClientId.trim();
+              const aKey = inputApiKey.trim();
+              if (!cId || !aKey) {
+                showAlert('Client ID와 API Key를 모두 입력해 주세요.', '입력 확인', 'warning');
+                return;
+              }
+              saveGoogleConfig(cId, aKey);
+              setShowConfigModal(false);
+              showAlert('구글 API 자격 증명이 브라우저에 저장되었습니다! 연결을 시작합니다.', '저장 완료', 'success');
+              tryInitializeSDKs();
+            }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ fontSize: '0.85rem', color: '#475569', margin: 0, lineHeight: '1.45' }}>
+                  입력하신 키는 이 브라우저의 로컬 스토리지에 안전하게 보관되며, 즉시 구글 로그인 모듈이 활성화됩니다.
+                </p>
+                <div>
+                  <label className="horizontal-form-label" style={{ marginBottom: '0.35rem', display: 'block', fontWeight: 800 }}>
+                    Google Client ID
+                  </label>
+                  <input 
+                    type="text" 
+                    className="horizontal-form-input" 
+                    placeholder="예: 10835...apps.googleusercontent.com"
+                    value={inputClientId}
+                    onChange={(e) => setInputClientId(e.target.value)}
+                    required
+                    style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace' }}
+                  />
+                </div>
+                <div>
+                  <label className="horizontal-form-label" style={{ marginBottom: '0.35rem', display: 'block', fontWeight: 800 }}>
+                    Google API Key
+                  </label>
+                  <input 
+                    type="text" 
+                    className="horizontal-form-input" 
+                    placeholder="예: AIzaSyDB..."
+                    value={inputApiKey}
+                    onChange={(e) => setInputApiKey(e.target.value)}
+                    required
+                    style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace' }}
+                  />
+                </div>
+              </div>
+              <div className="modal-footer" style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+                <button 
+                  type="button" 
+                  className="text-card-btn" 
+                  onClick={() => setShowConfigModal(false)}
+                >
+                  취소
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-primary"
+                >
+                  저장 및 연결하기
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
