@@ -366,12 +366,157 @@ export default function Dashboard() {
 
       const { students: loadedStudents, logs: loadedLogs } = await loadSpreadsheetData(spreadsheetId);
       
-      // Restore historical charDiff values by sorting logs chronologically and calculating delta step differences
+      const now = new Date();
+      const missingLogs = [];
+      let studentsDataUpdated = false;
+
+      // Check current live slide stats and revision history for each student (chunked concurrency)
+      const CONCURRENCY = 5;
+      for (let i = 0; i < loadedStudents.length; i += CONCURRENCY) {
+        const chunk = loadedStudents.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          chunk.map(async (student) => {
+            if (!student.slideId) return;
+
+            try {
+              // 1) Fetch current slide stats
+              const stats = await fetchSlideStats(student.slideId, keywords);
+
+              // 2) Fetch revision history from Google Drive
+              let revisions = [];
+              try {
+                const revResp = await window.gapi.client.drive.revisions.list({
+                  fileId: student.slideId,
+                  fields: 'revisions(id,modifiedTime)'
+                });
+                revisions = revResp.result.revisions || [];
+              } catch (revErr) {
+                console.warn(`Failed to check revisions for ${student.name}:`, revErr);
+              }
+
+              // Revisions index 0 is initial template copy creation.
+              // index 1+ are actual user edit revisions.
+              const userRevisions = revisions.slice(1);
+              const studentLogs = loadedLogs.filter(l => l.name === student.name);
+
+              // Determine if student has ever worked
+              const hasWorked = 
+                userRevisions.length > 0 || 
+                studentLogs.length > 0 || 
+                stats.charCount > 0 || 
+                stats.imageCount > 0 ||
+                student.status !== 'disconnected';
+
+              let nextStatus = student.status || 'disconnected';
+              let latestTime = student.lastActiveAt;
+
+              if (!hasWorked) {
+                nextStatus = 'disconnected';
+              } else {
+                // Determine latest active time
+                if (userRevisions.length > 0) {
+                  latestTime = userRevisions[userRevisions.length - 1].modifiedTime;
+                } else if (!latestTime) {
+                  latestTime = now.toISOString();
+                }
+
+                // If user edited within 5 minutes, status is 'active', otherwise 'idle'
+                const minutesSinceLastActive = (now.getTime() - new Date(latestTime).getTime()) / (1000 * 60);
+                if (student.status === 'suspicious') {
+                  nextStatus = 'suspicious';
+                } else if (minutesSinceLastActive <= 5) {
+                  nextStatus = 'active';
+                } else {
+                  nextStatus = 'idle';
+                }
+              }
+
+              // Detect changes compared to existing spreadsheet record
+              if (
+                student.status !== nextStatus ||
+                student.charCount !== stats.charCount ||
+                student.slideCount !== stats.slideCount ||
+                student.imageCount !== stats.imageCount
+              ) {
+                studentsDataUpdated = true;
+              }
+
+              // Update student object with actual live slide metrics
+              student.charCount = stats.charCount;
+              student.slideCount = stats.slideCount;
+              student.imageCount = stats.imageCount;
+              student.blankSlideCount = stats.blankSlideCount;
+              student.keywordsUsed = stats.keywordsUsed;
+              student.keywordCount = stats.keywordsUsed.length;
+              student.status = nextStatus;
+              if (latestTime) student.lastActiveAt = latestTime;
+              student.revisionId = stats.revisionId;
+              student.fullText = stats.fullText;
+
+              // 3) Backfill offline activities from userRevisions if missing from spreadsheet logs
+              if (userRevisions.length > 0) {
+                const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
+
+                const newRevisions = userRevisions.filter(rev => {
+                  const revTimeMinutes = Math.round(new Date(rev.modifiedTime).getTime() / (60 * 1000));
+                  return !existingTimes.some(et => Math.abs(et - revTimeMinutes) <= 3);
+                });
+
+                if (newRevisions.length > 0) {
+                  const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : 0;
+                  const endChar = stats.charCount;
+                  const charDiff = Math.max(endChar - startChar, 0);
+                  const step = newRevisions.length > 0 ? charDiff / newRevisions.length : 0;
+
+                  newRevisions.forEach((rev, idx) => {
+                    const estimatedChar = Math.round(startChar + step * (idx + 1));
+                    const prevEstimatedChar = Math.round(startChar + step * idx);
+                    const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
+
+                    missingLogs.push({
+                      name: student.name,
+                      timestamp: rev.modifiedTime,
+                      charCount: estimatedChar,
+                      slideCount: stats.slideCount,
+                      imageCount: stats.imageCount,
+                      keywordCount: stats.keywordsUsed.length,
+                      copiedText: diff >= 100 ? `[의심] 오프라인 대량 입력 감지 (+${diff}자)` : (diff > 0 ? `[추가] 교사 부재중 오프라인 작업 감지 (+${diff}자)` : '')
+                    });
+                  });
+                }
+              }
+            } catch (studentErr) {
+              console.error(`Error analyzing live slide for ${student.name}:`, studentErr);
+            }
+          })
+        );
+      }
+
+      // Persist updated students and missing offline logs to Google Spreadsheet DB
+      if (missingLogs.length > 0) {
+        console.log(`Backfilling ${missingLogs.length} missing offline activity points to spreadsheet DB...`);
+        try {
+          await appendActivityLogs(spreadsheetId, missingLogs);
+        } catch (appendErr) {
+          console.error('Failed to append missing logs:', appendErr);
+        }
+      }
+
+      if (studentsDataUpdated || missingLogs.length > 0) {
+        try {
+          await saveStudentsStatus(spreadsheetId, loadedStudents);
+        } catch (saveErr) {
+          console.error('Failed to sync updated student statuses to sheet:', saveErr);
+        }
+      }
+
+      // Merge existing logs and missing offline logs, sort chronologically and restore charDiff
+      const mergedLogs = [...loadedLogs, ...missingLogs];
+      const timeSortedLogs = [...mergedLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      
       const restoredLogs = [];
       const studentLastChars = {};
 
-      const timeSortedLogs = [...loadedLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      
       timeSortedLogs.forEach(log => {
         const prevChar = studentLastChars[log.name] || 0;
         const diff = log.charCount - prevChar;
@@ -383,95 +528,10 @@ export default function Dashboard() {
       });
 
       setStudents(loadedStudents);
-      
-      // Auto-backfill offline activities from Google Drive Revisions (when teacher is offline for 2-3 days)
-      const missingLogs = [];
-      try {
-        await Promise.all(
-          loadedStudents.map(async (student) => {
-            if (!student.slideId) return;
-            try {
-              const revResp = await window.gapi.client.drive.revisions.list({
-                fileId: student.slideId,
-                fields: 'revisions(id,modifiedTime)'
-              });
-              const revisions = revResp.result.revisions || [];
-              // Ignore if there is only the initial file copy creation revision (length <= 1)
-              if (revisions.length <= 1) return;
-
-              // If student has never connected and has no prior logs, ignore template creation
-              const studentLogs = loadedLogs.filter(l => l.name === student.name);
-              if (student.status === 'disconnected' && studentLogs.length === 0) return;
-
-              // Extracted times from already registered logs
-              const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
-
-              // Detect offline edits that are not captured in the spreadsheet logs within a 3-minute window
-              // Skip the first revision (index 0) which is just the template file copy
-              const userRevisions = revisions.slice(1);
-              const newRevisions = userRevisions.filter(rev => {
-                const revTimeMinutes = Math.round(new Date(rev.modifiedTime).getTime() / (60 * 1000));
-                return !existingTimes.some(et => Math.abs(et - revTimeMinutes) <= 3);
-              });
-
-              if (newRevisions.length === 0) return;
-
-              // Linearly interpolate offline character changes
-              const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : student.charCount;
-              const endChar = student.charCount;
-              const charDiff = Math.max(endChar - startChar, 0);
-              const step = newRevisions.length > 0 ? charDiff / newRevisions.length : 0;
-
-              newRevisions.forEach((rev, idx) => {
-                const estimatedChar = Math.round(startChar + step * (idx + 1));
-                const prevEstimatedChar = Math.round(startChar + step * idx);
-                const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
-
-                missingLogs.push({
-                  name: student.name,
-                  timestamp: rev.modifiedTime,
-                  charCount: estimatedChar,
-                  slideCount: student.slideCount,
-                  imageCount: student.imageCount,
-                  keywordCount: student.keywordCount,
-                  copiedText: diff > 0 ? `[추가] 교사 부재중 오프라인 작업 감지 (+${diff}자)` : ''
-                });
-              });
-            } catch (revErr) {
-              console.error(`Failed to check offline revisions for ${student.name}:`, revErr);
-            }
-          })
-        );
-
-        if (missingLogs.length > 0) {
-          console.log(`Backfilling ${missingLogs.length} missing offline activity points to spreadsheet DB...`);
-          await appendActivityLogs(spreadsheetId, missingLogs);
-          
-          // Re-merge, sort, and reconstruct char deltas for local render
-          const mergedLogs = [...loadedLogs, ...missingLogs];
-          const timeSortedMerged = [...mergedLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          
-          restoredLogs.length = 0; // Clear the array
-          const backfillLastChars = {};
-          
-          timeSortedMerged.forEach(log => {
-            const prevChar = backfillLastChars[log.name] || 0;
-            const diff = log.charCount - prevChar;
-            restoredLogs.push({
-              ...log,
-              charDiff: diff
-            });
-            backfillLastChars[log.name] = log.charCount;
-          });
-        }
-      } catch (backfillErr) {
-        console.error('Failed to run revision history backfill:', backfillErr);
-      }
-
       setLogs(restoredLogs);
       
       // Restore pollingTick to keep focusRatio scaling smooth after dashboard refresh
-      const avgTicks = loadedStudents.length > 0 ? Math.round(loadedLogs.length / loadedStudents.length) : 0;
+      const avgTicks = loadedStudents.length > 0 ? Math.round(restoredLogs.length / loadedStudents.length) : 0;
       setPollingTick(avgTicks);
     } catch (err) {
       console.error('Failed to load spreadsheet data:', err);
@@ -523,44 +583,13 @@ export default function Dashboard() {
           const charDiff = stats.charCount - prevCharCount;
           const slideDiff = stats.slideCount - prevSlideCount;
           const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
+          const isContentChanged = isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount;
 
           let nextStatus = prevStatus;
           let nextLastActive = student.lastActiveAt || now.toISOString();
-          
-          // Handle disconnected students who haven't started working yet
-          if (prevStatus === 'disconnected') {
-            // First tick: capture initial template baseline without creating fake activity log
-            if (!prevRevisionId) {
-              student.charCount = stats.charCount;
-              student.slideCount = stats.slideCount;
-              student.imageCount = stats.imageCount;
-              student.blankSlideCount = stats.blankSlideCount;
-              student.keywordsUsed = stats.keywordsUsed;
-              student.revisionId = stats.revisionId;
-              student.fullText = stats.fullText;
-              student.status = 'disconnected';
-              return;
-            }
 
-            // Revision and contents are unchanged -> stay disconnected
-            if (!isRevisionChanged && charDiff === 0 && slideDiff === 0 && stats.imageCount === prevImageCount) {
-              student.charCount = stats.charCount;
-              student.slideCount = stats.slideCount;
-              student.imageCount = stats.imageCount;
-              student.blankSlideCount = stats.blankSlideCount;
-              student.keywordsUsed = stats.keywordsUsed;
-              student.status = 'disconnected';
-              return;
-            }
-
-            // Actual interaction detected on previously disconnected student!
-            nextStatus = 'active';
-            nextLastActive = now.toISOString();
-            stateChanged = true;
-          }
-
-          // 1) Actual interaction detected for active/connected students
-          if (isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount) {
+          // 1) Actual interaction/content edit detected
+          if (isContentChanged) {
             nextStatus = 'active';
             nextLastActive = now.toISOString();
             stateChanged = true;
@@ -573,31 +602,51 @@ export default function Dashboard() {
 
             const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
 
-            newLogs.push({
-              name: student.name,
-              timestamp: now.toISOString(),
-              charCount: stats.charCount,
-              charDiff: charDiff,
-              slideCount: stats.slideCount,
-              imageCount: stats.imageCount,
-              keywordCount: stats.keywordsUsed.length,
-              copiedText: diffTextSegment || (charDiff > 0 ? `[추가] ${addedTextSnippet}` : '')
-            });
+            // Record log only when previous baseline exists and there is an actual delta
+            if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount)) {
+              newLogs.push({
+                name: student.name,
+                timestamp: now.toISOString(),
+                charCount: stats.charCount,
+                charDiff: charDiff,
+                slideCount: stats.slideCount,
+                imageCount: stats.imageCount,
+                keywordCount: stats.keywordsUsed.length,
+                copiedText: diffTextSegment || (charDiff > 0 ? `[추가] ${addedTextSnippet}` : '')
+              });
+            }
+          } else {
+            // 2) Content unchanged during this tick
+            const hasWorked = prevStatus !== 'disconnected' || stats.charCount > 0 || stats.imageCount > 0;
+
+            if (!hasWorked) {
+              // Never interacted and no content -> stay disconnected
+              nextStatus = 'disconnected';
+            } else {
+              // Interacted in the past -> active or idle based on idle time
+              const lastActiveTime = new Date(nextLastActive);
+              const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
+
+              if (minutesIdle >= 5) {
+                if (prevStatus !== 'idle') {
+                  nextStatus = 'idle';
+                  stateChanged = true;
+                }
+              } else if (prevStatus === 'suspicious') {
+                nextStatus = 'suspicious';
+              } else {
+                nextStatus = 'active';
+              }
+            }
           }
 
-          // 2) Revision unchanged (connected but idle)
-          if (!isRevisionChanged && charDiff === 0 && slideDiff === 0 && prevStatus !== 'disconnected') {
-            const lastActiveTime = new Date(nextLastActive);
-            const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
-
-            if (minutesIdle >= 5) {
-              nextStatus = 'idle';
-              stateChanged = true;
-            } else if (prevStatus === 'suspicious') {
-              nextStatus = 'suspicious'; // Hold suspicious warning state
-            } else {
-              nextStatus = 'active';
-            }
+          if (
+            nextStatus !== prevStatus || 
+            stats.charCount !== prevCharCount || 
+            stats.slideCount !== prevSlideCount || 
+            stats.imageCount !== prevImageCount
+          ) {
+            stateChanged = true;
           }
 
           let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
@@ -621,7 +670,7 @@ export default function Dashboard() {
 
         } catch (err) {
           console.error(`Error polling slide for ${student.name}:`, err);
-          if (student.status !== 'disconnected') {
+          if (student.status !== 'disconnected' && !student.charCount) {
             student.status = 'disconnected';
             stateChanged = true;
           }
