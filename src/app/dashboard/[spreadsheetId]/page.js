@@ -522,6 +522,10 @@ export default function Dashboard() {
 
           const charDiff = stats.charCount - prevCharCount;
           const slideDiff = stats.slideCount - prevSlideCount;
+          const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
+
+          let nextStatus = prevStatus;
+          let nextLastActive = student.lastActiveAt || now.toISOString();
           
           // Handle disconnected students who haven't started working yet
           if (prevStatus === 'disconnected') {
