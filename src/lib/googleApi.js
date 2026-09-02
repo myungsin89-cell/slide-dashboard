@@ -114,10 +114,30 @@ export function signOutTeacher() {
 }
 
 /**
+ * Helper to extract Google Slide ID from share link, edit URL, or raw ID
+ */
+export function extractSlideId(urlOrId) {
+  if (!urlOrId) return '';
+  const trimmed = urlOrId.trim();
+  
+  // 1) Match /d/{id} (e.g. docs.google.com/presentation/d/... or drive.google.com/file/d/...)
+  const dMatch = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (dMatch) return dMatch[1];
+
+  // 2) Match ?id={id} or &id={id} (e.g. drive.google.com/open?id=...)
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+  if (idParamMatch) return idParamMatch[1];
+
+  // 3) Fallback: clean up any leading/trailing query or hash
+  const clean = trimmed.split(/[\/\?#]/)[0];
+  return clean;
+}
+
+/**
  * 1. 수업용 DB 구글 스프레드시트 생성
  */
 export async function createDatabaseSpreadsheet(className, assignmentName) {
-  if (!getAccessToken()) throw new Error('Not authenticated');
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
 
   const title = `SlideSight_DB_[${className}]_[${assignmentName}]`;
   
@@ -186,78 +206,111 @@ export async function createDatabaseSpreadsheet(className, assignmentName) {
     }
   });
 
-  // 3) 스프레드시트를 "링크가 있는 누구나 뷰어 가능"으로 설정 (학생 진입용)
-  await window.gapi.client.drive.permissions.create({
-    fileId: spreadsheetId,
-    resource: {
-      role: 'reader',
-      type: 'anyone'
-    }
-  });
+  // 3) 스프레드시트를 "링크가 있는 누구나 뷰어 가능"으로 설정 (학생 진입용, 학교 정책 에러 대비 try-catch)
+  try {
+    await window.gapi.client.drive.permissions.create({
+      fileId: spreadsheetId,
+      supportsAllDrives: true,
+      resource: {
+        role: 'reader',
+        type: 'anyone'
+      }
+    });
+  } catch (permErr) {
+    console.warn('[SlideSight] 스프레드시트 링크 공유 권한 설정 실패 (학교 도메인 정책 제한일 수 있음):', permErr);
+  }
 
   return spreadsheetId;
 }
 
 /**
- * 2. 슬라이드 템플릿 복사 및 권한 부여
+ * 2. 슬라이드 템플릿 복사 및 권한 부여 (병렬 배치 복사 및 사전 검증 탑재)
  */
 export async function duplicateSlideForStudents(templateId, studentsList, spreadsheetId, onProgress) {
-  if (!getAccessToken()) throw new Error('Not authenticated');
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
+  if (!templateId) throw new Error('구글 슬라이드 템플릿 ID가 올바르지 않습니다.');
+
+  // 1) 템플릿 슬라이드 사전 검증 (존재 여부 및 복사 권한 확인)
+  try {
+    await window.gapi.client.drive.files.get({
+      fileId: templateId,
+      supportsAllDrives: true,
+      fields: 'id, name, mimeType'
+    });
+  } catch (templateErr) {
+    console.error('Template validation error:', templateErr);
+    const errDetail = templateErr?.result?.error?.message || templateErr?.message || '파일을 찾을 수 없습니다.';
+    throw new Error(`템플릿 슬라이드 접근 실패: ${errDetail}\n슬라이드 공유 설정이 '링크가 있는 모든 사용자(뷰어/편집자)'로 되어있는지 또는 올바른 주소인지 확인해 주세요.`);
+  }
 
   const studentsResults = [];
   const total = studentsList.length;
 
-  for (let i = 0; i < total; i++) {
-    const student = studentsList[i];
-    const studentName = student.name;
-    const studentNum = student.number || '';
-    
-    if (onProgress) {
-      onProgress({
-        current: i + 1,
-        total: total,
-        studentName: studentName,
-        studentNumber: studentNum,
-        percent: Math.round((i / total) * 100)
-      });
-    }
+  // 동시 3개씩 병렬 배치 복사로 대기 시간 단축 (25명 기준 60초 -> 10~15초)
+  const CONCURRENCY = 3;
+  let completedCount = 0;
 
-    // 1) 사본 만들기 (교사 드라이브 내)
-    const copyResponse = await window.gapi.client.drive.files.copy({
-      fileId: templateId,
-      resource: {
-        name: `[${studentNum ? studentNum + '번 ' : ''}${studentName}] SlideSight 과제`
-      }
-    });
+  for (let i = 0; i < total; i += CONCURRENCY) {
+    const chunk = studentsList.slice(i, i + CONCURRENCY);
 
-    const newSlideId = copyResponse.result.id;
-    const newSlideUrl = `https://docs.google.com/presentation/d/${newSlideId}/edit`;
+    const chunkResults = await Promise.all(
+      chunk.map(async (student) => {
+        const studentName = student.name;
+        const studentNum = student.number || '';
 
-    // 2) 공유 권한 설정 ("링크가 있는 누구나 편집 가능")
-    await window.gapi.client.drive.permissions.create({
-      fileId: newSlideId,
-      resource: {
-        role: 'writer',
-        type: 'anyone'
-      }
-    });
+        onProgress && onProgress({
+          current: Math.min(completedCount + 1, total),
+          total: total,
+          studentName: studentName,
+          studentNumber: studentNum,
+          percent: Math.round((completedCount / total) * 100)
+        });
 
-    studentsResults.push({
-      number: studentNum,
-      name: studentName,
-      slideId: newSlideId,
-      slideUrl: newSlideUrl
-    });
+        // 1) 사본 만들기 (교사 드라이브 내, 공유 드라이브 지원)
+        const copyResponse = await window.gapi.client.drive.files.copy({
+          fileId: templateId,
+          supportsAllDrives: true,
+          resource: {
+            name: `[${studentNum ? studentNum + '번 ' : ''}${studentName}] SlideSight 과제`
+          }
+        });
 
-    if (onProgress) {
-      onProgress({
-        current: i + 1,
-        total: total,
-        studentName: studentName,
-        studentNumber: studentNum,
-        percent: Math.round(((i + 1) / total) * 100)
-      });
-    }
+        const newSlideId = copyResponse.result.id;
+        const newSlideUrl = `https://docs.google.com/presentation/d/${newSlideId}/edit`;
+
+        // 2) 공유 권한 설정 ("링크가 있는 누구나 편집 가능")
+        try {
+          await window.gapi.client.drive.permissions.create({
+            fileId: newSlideId,
+            supportsAllDrives: true,
+            resource: {
+              role: 'writer',
+              type: 'anyone'
+            }
+          });
+        } catch (permErr) {
+          console.warn(`[SlideSight] ${studentName} 슬라이드 권한 설정 경고:`, permErr);
+        }
+
+        completedCount++;
+        onProgress && onProgress({
+          current: completedCount,
+          total: total,
+          studentName: studentName,
+          studentNumber: studentNum,
+          percent: Math.round((completedCount / total) * 100)
+        });
+
+        return {
+          number: studentNum,
+          name: studentName,
+          slideId: newSlideId,
+          slideUrl: newSlideUrl
+        };
+      })
+    );
+
+    studentsResults.push(...chunkResults);
   }
 
   // 3) 스프레드시트에 기입

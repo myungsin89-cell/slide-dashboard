@@ -10,7 +10,8 @@ import {
   fetchAssignmentsList,
   createDatabaseSpreadsheet,
   duplicateSlideForStudents,
-  deleteAssignment
+  deleteAssignment,
+  extractSlideId
 } from '@/lib/googleApi';
 
 export default function ClassWorkspace() {
@@ -102,13 +103,6 @@ export default function ClassWorkspace() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Helper to extract Google Slide ID from share link
-  const extractSlideId = (urlOrId) => {
-    if (!urlOrId) return '';
-    const match = urlOrId.match(/\/presentation\/d\/([a-zA-Z0-9-_]+)/);
-    return match ? match[1] : urlOrId;
   };
 
   // Helper to parse student lists (supports linebreaks, numbers, spacing)
@@ -731,12 +725,12 @@ export default function ClassWorkspace() {
         </div>
       )}
 
-      {/* Assignment Distribution Loader with Live Student Progress */}
+      {/* Assignment Distribution Loader with Enhanced 3-Step Visual Tracker */}
       {isCreatingAssignment && (
         <div className="custom-modal-backdrop">
-          <div className="custom-modal-content" style={{ textAlign: 'center', padding: '2.5rem 1.75rem', maxWidth: '440px' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', color: 'var(--brand-green-dark)', animation: 'spin 1.5s linear infinite', marginBottom: '1.25rem' }}>
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <div className="custom-modal-content" style={{ textAlign: 'center', padding: '2.25rem 1.75rem', maxWidth: '460px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '50%', color: 'var(--brand-green-dark)', animation: 'spin 1.5s linear infinite', marginBottom: '1rem' }}>
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="2" x2="12" y2="6" />
                 <line x1="12" y1="18" x2="12" y2="22" />
                 <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
@@ -747,44 +741,144 @@ export default function ClassWorkspace() {
                 <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
               </svg>
             </div>
-            <h3 style={{ fontWeight: 900, fontSize: '1.3rem', color: 'var(--text-main)', margin: '0 0 0.5rem 0' }}>
-              수업 과제 배부 중...
+            <h3 style={{ fontWeight: 900, fontSize: '1.25rem', color: 'var(--text-main)', margin: '0 0 0.35rem 0' }}>
+              수업 과제 자동 배부 중
             </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: '1.5', margin: '0 0 1.25rem 0' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: '1.45', margin: '0 0 1.25rem 0' }}>
               구글 드라이브 내에 데이터베이스를 구축하고 학생별 개인 슬라이드를 복사하고 있습니다.
             </p>
 
-            {/* Live Progress Bar */}
-            {creationStep === 'slide_duplication' && duplicationProgress && (
-              <div style={{ marginBottom: '1.25rem', textAlign: 'left' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 800, color: 'var(--brand-green-dark)', marginBottom: '0.35rem' }}>
-                  <span>
-                    [{duplicationProgress.current} / {duplicationProgress.total}명] {duplicationProgress.studentNumber ? `${duplicationProgress.studentNumber}번 ` : ''}{duplicationProgress.studentName} 복사 중
-                  </span>
-                  <span>{duplicationProgress.percent}%</span>
+            {/* 3-Step Progress Indicator */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginBottom: '1.25rem', textAlign: 'left' }}>
+              {/* Step 1: Database creation */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid',
+                backgroundColor: creationStep === 'db_creation' ? '#ecfdf5' : (creationStep === 'slide_duplication' || creationStep === 'done' ? '#f8fafc' : '#ffffff'),
+                borderColor: creationStep === 'db_creation' ? '#a7f3d0' : (creationStep === 'slide_duplication' || creationStep === 'done' ? '#e2e8f0' : '#e2e8f0')
+              }}>
+                <div style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 900,
+                  backgroundColor: (creationStep === 'slide_duplication' || creationStep === 'done') ? '#16a34a' : (creationStep === 'db_creation' ? 'var(--brand-green-dark)' : '#cbd5e1'),
+                  color: 'white'
+                }}>
+                  {(creationStep === 'slide_duplication' || creationStep === 'done') ? '✓' : '1'}
                 </div>
-                <div style={{ width: '100%', height: '8px', backgroundColor: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
-                  <div 
-                    style={{ 
-                      width: `${duplicationProgress.percent}%`, 
-                      height: '100%', 
-                      backgroundColor: 'var(--brand-green-dark)', 
-                      borderRadius: '999px',
-                      transition: 'width 0.25s ease-out' 
-                    }} 
-                  />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: creationStep === 'db_creation' ? '#065f46' : ((creationStep === 'slide_duplication' || creationStep === 'done') ? '#16a34a' : '#64748b') }}>
+                    1단계: 구글 스프레드시트 데이터베이스 생성
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {creationStep === 'db_creation' ? '실시간 DB 시트 및 로깅 테이블 구축 중...' : '생성 완료'}
+                  </div>
                 </div>
               </div>
-            )}
 
-            <div style={{ backgroundColor: '#ecfdf5', borderRadius: '8px', padding: '0.65rem 0.85rem', border: '1px solid #a7f3d0', fontSize: '0.85rem', fontWeight: 800, color: '#065f46' }}>
-              {creationStep === 'db_creation' && '1단계: 구글 스프레드시트 데이터베이스 생성 중...'}
-              {creationStep === 'slide_duplication' && (
-                duplicationProgress?.studentName 
-                  ? `2단계: ${duplicationProgress.studentNumber ? `${duplicationProgress.studentNumber}번 ` : ''}${duplicationProgress.studentName} 학생 슬라이드 사본 배부 중...`
-                  : '2단계: 학생별 개인 구글 슬라이드 사본 배부 및 공유 설정 중...'
-              )}
-              {creationStep === 'done' && '3단계: 생성 완료! 대시보드로 이동합니다.'}
+              {/* Step 2: Slide duplication */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.45rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid',
+                backgroundColor: creationStep === 'slide_duplication' ? '#ecfdf5' : (creationStep === 'done' ? '#f8fafc' : '#ffffff'),
+                borderColor: creationStep === 'slide_duplication' ? '#a7f3d0' : (creationStep === 'done' ? '#e2e8f0' : '#e2e8f0')
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.75rem',
+                    fontWeight: 900,
+                    backgroundColor: creationStep === 'done' ? '#16a34a' : (creationStep === 'slide_duplication' ? 'var(--brand-green-dark)' : '#cbd5e1'),
+                    color: 'white'
+                  }}>
+                    {creationStep === 'done' ? '✓' : '2'}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: creationStep === 'slide_duplication' ? '#065f46' : (creationStep === 'done' ? '#16a34a' : '#64748b') }}>
+                      2단계: 학생별 개인 구글 슬라이드 사본 배부
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {creationStep === 'slide_duplication' 
+                        ? (duplicationProgress?.studentName ? `[${duplicationProgress.current} / ${duplicationProgress.total}명] ${duplicationProgress.studentNumber ? `${duplicationProgress.studentNumber}번 ` : ''}${duplicationProgress.studentName} 복사 중` : '슬라이드 사본 생성 및 편집 권한 부여 중...')
+                        : (creationStep === 'done' ? '모든 학생 슬라이드 배부 완료' : '대기 중')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress bar inside Step 2 */}
+                {creationStep === 'slide_duplication' && duplicationProgress && (
+                  <div style={{ marginTop: '0.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', fontWeight: 800, color: 'var(--brand-green-dark)', marginBottom: '0.25rem' }}>
+                      <span>진행률</span>
+                      <span>{duplicationProgress.percent}%</span>
+                    </div>
+                    <div style={{ width: '100%', height: '7px', backgroundColor: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div 
+                        style={{ 
+                          width: `${duplicationProgress.percent}%`, 
+                          height: '100%', 
+                          backgroundColor: 'var(--brand-green-dark)', 
+                          borderRadius: '999px',
+                          transition: 'width 0.25s ease-out' 
+                        }} 
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: Done & Dashboard redirect */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid',
+                backgroundColor: creationStep === 'done' ? '#ecfdf5' : '#ffffff',
+                borderColor: creationStep === 'done' ? '#a7f3d0' : '#e2e8f0'
+              }}>
+                <div style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 900,
+                  backgroundColor: creationStep === 'done' ? '#16a34a' : '#cbd5e1',
+                  color: 'white'
+                }}>
+                  {creationStep === 'done' ? '✓' : '3'}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: creationStep === 'done' ? '#065f46' : '#64748b' }}>
+                    3단계: 생성 완료 및 대시보드 진입
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {creationStep === 'done' ? '대시보드로 이동합니다...' : '대기 중'}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
