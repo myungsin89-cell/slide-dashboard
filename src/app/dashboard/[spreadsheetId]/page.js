@@ -391,15 +391,13 @@ export default function Dashboard() {
               const userRevisions = revisions.slice(1);
               const studentLogs = baseLogs.filter(l => l.name === student.name);
 
-              // Determine if student has ever worked
-              const hasWorked = 
-                userRevisions.length > 0 || 
-                studentLogs.length > 0 || 
-                stats.charCount > 0 || 
-                stats.imageCount > 0 ||
-                student.status !== 'disconnected';
+              // Determine if student has ever worked:
+              // A student has worked ONLY if they created actual edit revisions after template copy,
+              // or if they already have logged activity in the sheet.
+              // (Template default text/images do NOT count as student work)
+              const hasWorked = userRevisions.length > 0 || studentLogs.length > 0;
 
-              let nextStatus = student.status || 'disconnected';
+              let nextStatus = 'disconnected';
               let latestTime = student.lastActiveAt;
 
               if (!hasWorked) {
@@ -654,10 +652,8 @@ export default function Dashboard() {
             }
           } else {
             // 2) Content unchanged during this tick
-            const hasWorked = prevStatus !== 'disconnected' || stats.charCount > 0 || stats.imageCount > 0;
-
-            if (!hasWorked) {
-              // Never interacted and no content -> stay disconnected
+            if (prevStatus === 'disconnected') {
+              // Never interacted / no edit revisions -> stay disconnected
               nextStatus = 'disconnected';
             } else {
               // Interacted in the past -> active or idle based on idle time
