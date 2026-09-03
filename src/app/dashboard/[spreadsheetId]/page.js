@@ -484,7 +484,13 @@ export default function Dashboard() {
                       slideCount: stats.slideCount,
                       imageCount: stats.imageCount,
                       keywordCount: stats.keywordsUsed.length,
-                      copiedText: diff >= 100 ? `[의심] 오프라인 대량 입력 감지 (+${diff}자)` : (diff > 0 ? `[추가] 교사 부재중 오프라인 작업 감지 (+${diff}자)` : '')
+                      copiedText: diff >= 100 
+                        ? `[의심] 텍스트 대량 입력(복붙 의심) (+${diff}자)` 
+                        : (diff > 0 
+                            ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
+                            : (stats.imageCount > 0 
+                                ? `[편집] 슬라이드 개체 및 이미지 자료 배치` 
+                                : `[편집] 슬라이드 내용 및 서식 수정`))
                     });
                   });
                 }
@@ -655,7 +661,20 @@ export default function Dashboard() {
               diffTextSegment = extractDiffText(prevText, stats.fullText);
             }
 
-            const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
+            let logSnippet = '';
+            if (diffTextSegment) {
+              logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
+            } else if (addedTextSnippet) {
+              logSnippet = `[작성] "${addedTextSnippet}"`;
+            } else if (slideDiff > 0) {
+              logSnippet = `[슬라이드] 새 슬라이드 추가 (+${slideDiff}장)`;
+            } else if (stats.imageCount > prevImageCount) {
+              logSnippet = `[시각화] 이미지 자료 추가 (+${stats.imageCount - prevImageCount}개)`;
+            } else if (charDiff < 0) {
+              logSnippet = `[수정] 본문 텍스트 퇴고 및 정리 (${charDiff}자)`;
+            } else {
+              logSnippet = `[편집] 슬라이드 서식 및 개체 편집`;
+            }
 
             // Record log only when previous baseline exists and there is an actual delta
             if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount)) {
@@ -667,7 +686,7 @@ export default function Dashboard() {
                 slideCount: stats.slideCount,
                 imageCount: stats.imageCount,
                 keywordCount: stats.keywordsUsed.length,
-                copiedText: diffTextSegment || (charDiff > 0 ? `[추가] ${addedTextSnippet}` : '')
+                copiedText: logSnippet
               });
             }
           } else {
@@ -2373,22 +2392,18 @@ export default function Dashboard() {
                         fontSize: '0.75rem'
                       }}>
                         {studentLogs.map((log, index) => {
-                          const timeStr = new Date(log.timestamp).toLocaleTimeString();
+                          const logDate = new Date(log.timestamp);
+                          const isToday = logDate.toDateString() === new Date().toDateString();
+                          const timeStr = isToday 
+                            ? logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : `${logDate.getMonth() + 1}/${logDate.getDate()} ${logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                           
-                          // Parse differential text if fused into copiedText
-                          let isCopied = false;
-                          let displaySnippet = '';
-                          
-                          if (log.copiedText) {
-                            if (log.copiedText.startsWith('[추가]')) {
-                              displaySnippet = log.copiedText.replace('[추가]', '').trim();
-                            } else {
-                              isCopied = true;
-                              displaySnippet = log.copiedText;
-                            }
-                          }
+                          // Clean up and format action text
+                          let rawText = log.copiedText || '';
+                          rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
+                          rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
 
-                          // Calculate char diff from the log item (or fallback)
+                          const isCopied = rawText.includes('[의심]');
                           const diff = log.charDiff !== undefined ? log.charDiff : 0;
                           const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
                           const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
@@ -2396,19 +2411,19 @@ export default function Dashboard() {
                           return (
                             <div key={index} style={{ padding: '0.45rem 0.65rem', backgroundColor: '#f8fafc', border: '1px solid var(--border-card)', borderRadius: '6px' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#475569', marginBottom: '0.15rem' }}>
-                                <span>{timeStr}</span>
+                                <span>⏰ {timeStr}</span>
                                 <span style={{ color: diffColor }}>
-                                  {diff !== 0 ? `✍️ ${diffSign}자` : '변화 없음'} ({log.charCount}자)
+                                  {diff !== 0 ? `✍️ ${diffSign}자` : '서식 편집'} ({log.charCount}자)
                                 </span>
                               </div>
-                              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', wordBreak: 'break-all' }}>
+                              <div style={{ color: '#334155', fontSize: '0.73rem', wordBreak: 'break-all' }}>
                                 {isCopied ? (
-                                  <span style={{ color: '#ef4444', fontWeight: 800 }}>⚠️ 복붙 의심 적발 ({diffSign}자 급증)</span>
+                                  <span style={{ color: '#ef4444', fontWeight: 800 }}>⚠️ {rawText}</span>
                                 ) : (
-                                  displaySnippet ? (
-                                    <span style={{ fontStyle: 'italic', color: '#475569' }}>"{displaySnippet}"</span>
+                                  rawText ? (
+                                    <span>{rawText}</span>
                                   ) : (
-                                    <span>슬라이드 개조 및 레이아웃 수정 감지</span>
+                                    <span style={{ color: '#64748b' }}>슬라이드 서식 및 개체 편집</span>
                                   )
                                 )}
                               </div>
@@ -2491,26 +2506,44 @@ export default function Dashboard() {
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {logs.filter(l => l.name === activeStudent.name && l.copiedText && !l.copiedText.startsWith('[추가]')).length === 0 ? (
-                <div style={{ textAlign: 'center', color: '#64748b', padding: '3rem 0' }}>복붙 의심 적발 내역이 없습니다.</div>
-              ) : (
-                logs.filter(l => l.name === activeStudent.name && l.copiedText && !l.copiedText.startsWith('[추가]')).map((log, index) => (
-                  <div key={index} style={{ padding: '1rem', backgroundColor: '#fff8f8', border: '1px solid #fee2e2', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: '#b91c1c', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                      <span>⏰ 감지 시간: {new Date(log.timestamp).toLocaleString()}</span>
-                      <span>글자 수: {log.charCount}자</span>
+              {(() => {
+                const suspiciousLogs = logs.filter(l => {
+                  if (l.name !== activeStudent.name || !l.copiedText) return false;
+                  const isNormal = 
+                    l.copiedText.startsWith('[작성]') || 
+                    l.copiedText.startsWith('[추가]') || 
+                    l.copiedText.startsWith('[편집]') || 
+                    l.copiedText.startsWith('[슬라이드]') || 
+                    l.copiedText.startsWith('[시각화]') || 
+                    l.copiedText.startsWith('[수정]');
+                  return l.copiedText.includes('[의심]') || (!isNormal && (l.charDiff || 0) >= 100);
+                });
+
+                if (suspiciousLogs.length === 0) {
+                  return <div style={{ textAlign: 'center', color: '#64748b', padding: '3rem 0' }}>복붙 의심 적발 내역이 없습니다.</div>;
+                }
+
+                return suspiciousLogs.map((log, index) => {
+                  let rawText = log.copiedText || '';
+                  rawText = rawText.replace(/\[의심\]\s*/g, '');
+                  return (
+                    <div key={index} style={{ padding: '1rem', backgroundColor: '#fff8f8', border: '1px solid #fee2e2', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: '#b91c1c', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                        <span>⏰ 감지 시간: {new Date(log.timestamp).toLocaleString()}</span>
+                        <span>글자 수: {log.charCount}자</span>
+                      </div>
+                      <div style={{ 
+                        fontFamily: 'monospace', fontSize: '0.82rem', color: '#334155',
+                        backgroundColor: 'white', padding: '0.75rem 1rem', borderRadius: '6px',
+                        border: '1px solid #fee2e2', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto',
+                        lineHeight: '1.5', wordBreak: 'break-all'
+                      }}>
+                        {rawText}
+                      </div>
                     </div>
-                    <div style={{ 
-                      fontFamily: 'monospace', fontSize: '0.82rem', color: '#334155',
-                      backgroundColor: 'white', padding: '0.75rem 1rem', borderRadius: '6px',
-                      border: '1px solid #fee2e2', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto',
-                      lineHeight: '1.5', wordBreak: 'break-all'
-                    }}>
-                      {log.copiedText}
-                    </div>
-                  </div>
-                ))
-              )}
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>
@@ -2562,28 +2595,23 @@ export default function Dashboard() {
                       const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
                       const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
 
-                      let isCopied = false;
-                      let displaySnippet = '';
-                      if (log.copiedText) {
-                        if (log.copiedText.startsWith('[추가]')) {
-                          displaySnippet = log.copiedText.replace('[추가]', '').trim();
-                        } else {
-                          isCopied = true;
-                          displaySnippet = log.copiedText;
-                        }
-                      }
+                      let rawText = log.copiedText || '';
+                      rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
+                      rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+
+                      const isCopied = rawText.includes('[의심]');
 
                       return (
                         <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700 }}>{dateStr}</td>
                           <td style={{ padding: '0.75rem 1rem', color: '#334155', wordBreak: 'break-all' }}>
                             {isCopied ? (
-                              <span style={{ color: '#ef4444', fontWeight: 800 }}>⚠️ 복붙 의심 감지: "{displaySnippet.substring(0, 150)}{displaySnippet.length > 150 ? '...' : ''}"</span>
+                              <span style={{ color: '#ef4444', fontWeight: 800 }}>⚠️ {rawText}</span>
                             ) : (
-                              displaySnippet ? (
-                                <span style={{ fontStyle: 'italic', color: '#475569' }}>"{displaySnippet}"</span>
+                              rawText ? (
+                                <span>{rawText}</span>
                               ) : (
-                                <span style={{ color: '#64748b' }}>슬라이드 수정 / 버전 갱신</span>
+                                <span style={{ color: '#64748b' }}>슬라이드 서식 및 개체 편집</span>
                               )
                             )}
                           </td>
@@ -2771,13 +2799,17 @@ export default function Dashboard() {
                   const diff = selectedPoint.charDiff !== undefined ? selectedPoint.charDiff : 0;
                   const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
                   const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
-                  const isSuspicious = selectedPoint.copiedText && !selectedPoint.copiedText.startsWith('[추가]');
+                  let rawText = selectedPoint.copiedText || '';
+                  rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
+                  rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+
+                  const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && diff >= 100);
 
                   let displaySnippet = '';
-                  if (selectedPoint.copiedText) {
-                    displaySnippet = selectedPoint.copiedText.startsWith('[추가]') 
-                      ? selectedPoint.copiedText.replace('[추가]', '').trim() 
-                      : selectedPoint.copiedText;
+                  if (rawText.startsWith('[추가]') || rawText.startsWith('[작성]')) {
+                    displaySnippet = rawText.replace(/^\[(추가|작성)\]\s*/, '').trim();
+                  } else {
+                    displaySnippet = rawText;
                   }
 
                   return (
