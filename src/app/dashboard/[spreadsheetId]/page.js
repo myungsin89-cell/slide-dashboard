@@ -477,10 +477,8 @@ export default function Dashboard() {
                     const prevEstimatedChar = Math.round(startChar + step * idx);
                     const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
 
-                    // Offline revisions can span hours/days, so normal text writing must NOT be marked suspicious!
-                    // Only flag as suspicious if a single revision diff is truly extreme (>= 400 chars)
-                    const isExtremeDiff = diff >= 400;
-
+                    // Offline revisions do not have real-time text diff snippets.
+                    // Always record as clean text writing/editing without any "offline" or "suspicious" tags.
                     missingLogs.push({
                       name: student.name,
                       timestamp: rev.modifiedTime,
@@ -488,13 +486,11 @@ export default function Dashboard() {
                       slideCount: stats.slideCount,
                       imageCount: stats.imageCount,
                       keywordCount: stats.keywordsUsed.length,
-                      copiedText: isExtremeDiff 
-                        ? `[의심] 텍스트 대량 입력(복붙 의심) (+${diff}자)` 
-                        : (diff > 0 
-                            ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
-                            : (stats.imageCount > 0 
-                                ? `[편집] 슬라이드 개체 및 이미지 자료 배치` 
-                                : `[편집] 슬라이드 내용 및 서식 수정`))
+                      copiedText: diff > 0 
+                        ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
+                        : (stats.imageCount > 0 
+                            ? `[편집] 슬라이드 개체 및 이미지 자료 배치` 
+                            : `[편집] 슬라이드 내용 및 서식 수정`)
                     });
                   });
                 }
@@ -2298,7 +2294,7 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                {/* Copy-Paste Log Timeline (Shows ONLY truly suspicious events, never normal writing) */}
+                {/* Copy-Paste Log Timeline (Shows ONLY truly suspicious pasted text, never system messages or normal writing) */}
                 {(() => {
                   const suspiciousLogs = logs.filter(l => {
                     if (l.name !== activeStudent.name || !l.copiedText) return false;
@@ -2307,12 +2303,11 @@ export default function Dashboard() {
                     if (text.startsWith('[작성]') || text.startsWith('[추가]') || text.startsWith('[편집]') || text.startsWith('[슬라이드]') || text.startsWith('[시각화]') || text.startsWith('[수정]')) {
                       return false;
                     }
-                    // If it contains [의심], verify it's not a legacy false-positive offline log under 400 chars
-                    if (text.includes('[의심]')) {
-                      if (text.includes('오프라인 대량 입력') && (l.charDiff || 0) < 400) return false;
-                      return true;
+                    // Exclude any offline/absence system notices (never show "오프라인" or "부재중" as paste text)
+                    if (text.includes('오프라인') || text.includes('부재중') || text.includes('대량 입력 감지')) {
+                      return false;
                     }
-                    return (l.charDiff || 0) >= 180;
+                    return text.includes('[의심]') || (l.charDiff || 0) >= 180;
                   });
 
                   if (suspiciousLogs.length === 0) return null;
@@ -2351,11 +2346,14 @@ export default function Dashboard() {
                         gap: '0.5rem'
                       }}>
                         {suspiciousLogs.map((log, index) => {
-                          let cleanText = log.copiedText.replace(/\[의심\]\s*/g, '');
+                          let cleanText = log.copiedText;
+                          cleanText = cleanText.replace(/\[의심\]\s*/g, '');
+                          cleanText = cleanText.replace(/^대량\s*복붙\s*의심:\s*/g, '');
+                          cleanText = cleanText.replace(/^["']|["']$/g, '');
                           return (
                             <div key={index} style={{ fontSize: '0.75rem', borderBottom: '1px solid #fee2e2', paddingBottom: '0.35rem' }}>
                               <div style={{ color: '#b91c1c', fontWeight: 800, marginBottom: '0.15rem' }}>
-                                [{new Date(log.timestamp).toLocaleTimeString()}] 감지된 대량 텍스트:
+                                [{new Date(log.timestamp).toLocaleTimeString()}] 감지된 붙여넣기 내용:
                               </div>
                               <div style={{ 
                                 fontFamily: 'monospace', 
@@ -2428,11 +2426,10 @@ export default function Dashboard() {
                           // Clean up and format action text
                           let rawText = log.copiedText || '';
                           rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                          if (rawText.includes('오프라인 대량 입력') && diff < 400) {
-                            rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
-                          } else {
-                            rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
-                          }
+                          rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                          rawText = rawText.replace(/오프라인 대량 입력 감지/g, '슬라이드 본문 작성');
+                          rawText = rawText.replace(/교사\s*부재중\s*/g, '');
+                          rawText = rawText.replace(/오프라인\s*/g, '');
 
                           const isCopied = rawText.includes('[의심]');
                           const diff = log.charDiff !== undefined ? log.charDiff : 0;
@@ -2540,31 +2537,36 @@ export default function Dashboard() {
               {(() => {
                 const suspiciousLogs = logs.filter(l => {
                   if (l.name !== activeStudent.name || !l.copiedText) return false;
-                  const isNormal = 
-                    l.copiedText.startsWith('[작성]') || 
-                    l.copiedText.startsWith('[추가]') || 
-                    l.copiedText.startsWith('[편집]') || 
-                    l.copiedText.startsWith('[슬라이드]') || 
-                    l.copiedText.startsWith('[시각화]') || 
-                    l.copiedText.startsWith('[수정]');
-                  return l.copiedText.includes('[의심]') || (!isNormal && (l.charDiff || 0) >= 100);
+                  const text = l.copiedText;
+                  // Exclude normal writings
+                  if (text.startsWith('[작성]') || text.startsWith('[추가]') || text.startsWith('[편집]') || text.startsWith('[슬라이드]') || text.startsWith('[시각화]') || text.startsWith('[수정]')) {
+                    return false;
+                  }
+                  // Exclude system notices (never show "오프라인" or "부재중" as paste text)
+                  if (text.includes('오프라인') || text.includes('부재중') || text.includes('대량 입력 감지')) {
+                    return false;
+                  }
+                  return text.includes('[의심]') || (l.charDiff || 0) >= 180;
                 });
 
                 if (suspiciousLogs.length === 0) {
-                  return <div style={{ textAlign: 'center', color: '#64748b', padding: '3rem 0' }}>복붙 의심 적발 내역이 없습니다.</div>;
+                  return <div style={{ textAlign: 'center', color: '#64748b', padding: '3rem 0' }}>감지된 복붙 의심 내역이 없습니다.</div>;
                 }
 
                 return suspiciousLogs.map((log, index) => {
                   let rawText = log.copiedText || '';
                   rawText = rawText.replace(/\[의심\]\s*/g, '');
+                  rawText = rawText.replace(/^대량\s*복붙\s*의심:\s*/g, '');
+                  rawText = rawText.replace(/^["']|["']$/g, '');
+
                   return (
                     <div key={index} style={{ padding: '1rem', backgroundColor: '#fff8f8', border: '1px solid #fee2e2', borderRadius: '8px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, color: '#b91c1c', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
                         <span>⏰ 감지 시간: {new Date(log.timestamp).toLocaleString()}</span>
-                        <span>글자 수: {log.charCount}자</span>
+                        <span>글자 수: {log.charCount}자 (+{log.charDiff || 0}자 급증)</span>
                       </div>
                       <div style={{ 
-                        fontFamily: 'monospace', fontSize: '0.82rem', color: '#334155',
+                        fontFamily: 'monospace', fontSize: '0.84rem', color: '#334155',
                         backgroundColor: 'white', padding: '0.75rem 1rem', borderRadius: '6px',
                         border: '1px solid #fee2e2', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto',
                         lineHeight: '1.5', wordBreak: 'break-all'
@@ -2628,11 +2630,10 @@ export default function Dashboard() {
 
                       let rawText = log.copiedText || '';
                       rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                      if (rawText.includes('오프라인 대량 입력') && diff < 400) {
-                        rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
-                      } else {
-                        rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
-                      }
+                      rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                      rawText = rawText.replace(/오프라인 대량 입력 감지/g, '슬라이드 본문 작성');
+                      rawText = rawText.replace(/교사\s*부재중\s*/g, '');
+                      rawText = rawText.replace(/오프라인\s*/g, '');
 
                       const isCopied = rawText.includes('[의심]');
 
@@ -2836,11 +2837,10 @@ export default function Dashboard() {
                   const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
                   let rawText = selectedPoint.copiedText || '';
                   rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                  if (rawText.includes('오프라인 대량 입력') && diff < 400) {
-                    rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
-                  } else {
-                    rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
-                  }
+                  rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                  rawText = rawText.replace(/오프라인 대량 입력 감지/g, '슬라이드 본문 작성');
+                  rawText = rawText.replace(/교사\s*부재중\s*/g, '');
+                  rawText = rawText.replace(/오프라인\s*/g, '');
 
                   const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && !rawText.startsWith('[슬라이드]') && !rawText.startsWith('[시각화]') && !rawText.startsWith('[수정]') && diff >= 180);
 
