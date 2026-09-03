@@ -230,6 +230,23 @@ export default function Dashboard() {
   const [isReportMode, setIsReportMode] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'idle', 'suspicious', 'active', 'disconnected'
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
+
+  // Keep activeStudent state synced with updated student list without losing focus
+  useEffect(() => {
+    if (activeStudent) {
+      const latest = students.find(s => s.name === activeStudent.name);
+      if (latest && (
+        latest.charCount !== activeStudent.charCount || 
+        latest.status !== activeStudent.status || 
+        latest.slideCount !== activeStudent.slideCount ||
+        latest.imageCount !== activeStudent.imageCount
+      )) {
+        setActiveStudent(prev => ({ ...prev, ...latest }));
+      }
+    }
+  }, [students]);
 
   // Custom Alert / Confirm Modal state
   const [alertConfig, setAlertConfig] = useState(null); // { isOpen, title, message, type, isConfirm, onConfirm }
@@ -354,6 +371,7 @@ export default function Dashboard() {
 
   // Background live slide syncing & offline revision backfilling (non-blocking)
   const syncLiveSlideStatsAndBackfill = async (baseStudents, baseLogs) => {
+    setIsBackgroundSyncing(true);
     try {
       const now = new Date();
       const missingLogs = [];
@@ -516,6 +534,8 @@ export default function Dashboard() {
       setLogs(restoredLogs);
     } catch (bgErr) {
       console.warn('Background sync error (non-fatal):', bgErr);
+    } finally {
+      setIsBackgroundSyncing(false);
     }
   };
 
@@ -729,11 +749,14 @@ export default function Dashboard() {
     }
   };
 
-  // Manual Trigger Poll
+  // Manual Trigger Poll (Silent background refresh without hiding student cards)
   const handleManualRefresh = async () => {
-    setIsLoading(true);
-    await pollStudentSlides();
-    setIsLoading(false);
+    setIsManualRefreshing(true);
+    try {
+      await pollStudentSlides();
+    } finally {
+      setIsManualRefreshing(false);
+    }
   };
 
   // Handle saving feedback notes
@@ -1300,13 +1323,23 @@ export default function Dashboard() {
             <span style={{ 
               fontSize: '0.75rem', 
               fontWeight: 700, 
-              backgroundColor: 'var(--bg-light-green)', 
-              color: 'var(--text-light-green)', 
+              backgroundColor: isBackgroundSyncing ? '#eff6ff' : 'var(--bg-light-green)', 
+              color: isBackgroundSyncing ? '#2563eb' : 'var(--text-light-green)', 
               padding: '0.15rem 0.5rem', 
               borderRadius: '4px',
-              marginLeft: '0.25rem'
+              marginLeft: '0.25rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem'
             }}>
-              ● 실시간 감지 중
+              {isBackgroundSyncing ? (
+                <>
+                  <span style={{ display: 'inline-block', animation: 'spin 1.5s linear infinite' }}>⏳</span>
+                  <span>데이터 동기화 중...</span>
+                </>
+              ) : (
+                '● 실시간 감지 중'
+              )}
             </span>
           )}
         </div>
@@ -1349,8 +1382,20 @@ export default function Dashboard() {
                 </span>
               </div>
 
-              <button className="text-card-btn" style={{ fontSize: '0.85rem', padding: '0.45rem 0.85rem' }} onClick={handleManualRefresh} disabled={isLoading}>
-                즉시 갱신
+              <button 
+                className="text-card-btn" 
+                style={{ fontSize: '0.85rem', padding: '0.45rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }} 
+                onClick={handleManualRefresh} 
+                disabled={isManualRefreshing}
+              >
+                {isManualRefreshing ? (
+                  <>
+                    <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>🔄</span>
+                    <span>갱신 중...</span>
+                  </>
+                ) : (
+                  '즉시 갱신'
+                )}
               </button>
 
               <button 
@@ -1824,7 +1869,7 @@ export default function Dashboard() {
             </div>
 
             {/* Students 바둑판 그리드 */}
-            {isLoading ? (
+            {isLoading && students.length === 0 ? (
               <div className="card" style={{ padding: '4rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
                 데이터 동기화 및 갱신 중...
               </div>
