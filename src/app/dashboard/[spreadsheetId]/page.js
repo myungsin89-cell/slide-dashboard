@@ -477,6 +477,10 @@ export default function Dashboard() {
                     const prevEstimatedChar = Math.round(startChar + step * idx);
                     const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
 
+                    // Offline revisions can span hours/days, so normal text writing must NOT be marked suspicious!
+                    // Only flag as suspicious if a single revision diff is truly extreme (>= 400 chars)
+                    const isExtremeDiff = diff >= 400;
+
                     missingLogs.push({
                       name: student.name,
                       timestamp: rev.modifiedTime,
@@ -484,7 +488,7 @@ export default function Dashboard() {
                       slideCount: stats.slideCount,
                       imageCount: stats.imageCount,
                       keywordCount: stats.keywordsUsed.length,
-                      copiedText: diff >= 100 
+                      copiedText: isExtremeDiff 
                         ? `[의심] 텍스트 대량 입력(복붙 의심) (+${diff}자)` 
                         : (diff > 0 
                             ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
@@ -656,13 +660,17 @@ export default function Dashboard() {
             stateChanged = true;
 
             let diffTextSegment = '';
-            if (charDiff >= 100) {
+            // Real-time polling is ~25s. Typing 180+ Korean characters in 25s (~500+ CPM) indicates likely copy-paste.
+            const isPasteSuspicious = charDiff >= 180;
+            if (isPasteSuspicious) {
               nextStatus = 'suspicious';
               diffTextSegment = extractDiffText(prevText, stats.fullText);
             }
 
+            const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
+
             let logSnippet = '';
-            if (diffTextSegment) {
+            if (isPasteSuspicious && diffTextSegment) {
               logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
             } else if (addedTextSnippet) {
               logSnippet = `[작성] "${addedTextSnippet}"`;
@@ -2290,65 +2298,84 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                {/* Copy-Paste Log Timeline */}
-                {logs.filter(l => l.name === activeStudent.name && l.copiedText).length > 0 && (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <h4 style={{ fontWeight: 800, fontSize: '0.9rem', color: '#ef4444', margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                        ⚠️ 감지된 붙여넣기(복붙) 내역
-                      </h4>
-                      <button 
-                        onClick={() => setShowCopyPasteModal(true)}
-                        style={{ 
-                          fontSize: '0.7rem', 
-                          fontWeight: 800, 
-                          color: '#ef4444', 
-                          backgroundColor: '#fef2f2', 
-                          border: '1px solid #fee2e2', 
-                          borderRadius: '4px', 
-                          padding: '0.15rem 0.45rem', 
-                          cursor: 'pointer' 
-                        }}
-                      >
-                        🔍 크게 보기
-                      </button>
-                    </div>
-                    <div style={{ 
-                      maxHeight: '120px', 
-                      overflowY: 'auto', 
-                      border: '1px solid #fecaca', 
-                      borderRadius: '8px', 
-                      padding: '0.65rem', 
-                      backgroundColor: '#fff5f5',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.5rem'
-                    }}>
-                      {logs
-                        .filter(l => l.name === activeStudent.name && l.copiedText)
-                        .map((log, index) => (
-                          <div key={index} style={{ fontSize: '0.75rem', borderBottom: '1px solid #fee2e2', paddingBottom: '0.35rem' }}>
-                            <div style={{ color: '#b91c1c', fontWeight: 800, marginBottom: '0.15rem' }}>
-                              [{new Date(log.timestamp).toLocaleTimeString()}] 감지된 텍스트:
+                {/* Copy-Paste Log Timeline (Shows ONLY truly suspicious events, never normal writing) */}
+                {(() => {
+                  const suspiciousLogs = logs.filter(l => {
+                    if (l.name !== activeStudent.name || !l.copiedText) return false;
+                    const text = l.copiedText;
+                    // Ignore normal writings
+                    if (text.startsWith('[작성]') || text.startsWith('[추가]') || text.startsWith('[편집]') || text.startsWith('[슬라이드]') || text.startsWith('[시각화]') || text.startsWith('[수정]')) {
+                      return false;
+                    }
+                    // If it contains [의심], verify it's not a legacy false-positive offline log under 400 chars
+                    if (text.includes('[의심]')) {
+                      if (text.includes('오프라인 대량 입력') && (l.charDiff || 0) < 400) return false;
+                      return true;
+                    }
+                    return (l.charDiff || 0) >= 180;
+                  });
+
+                  if (suspiciousLogs.length === 0) return null;
+
+                  return (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <h4 style={{ fontWeight: 800, fontSize: '0.9rem', color: '#ef4444', margin: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          ⚠️ 감지된 붙여넣기(복붙) 의심 내역 ({suspiciousLogs.length}건)
+                        </h4>
+                        <button 
+                          onClick={() => setShowCopyPasteModal(true)}
+                          style={{ 
+                            fontSize: '0.7rem', 
+                            fontWeight: 800, 
+                            color: '#ef4444', 
+                            backgroundColor: '#fef2f2', 
+                            border: '1px solid #fee2e2', 
+                            borderRadius: '4px', 
+                            padding: '0.15rem 0.45rem', 
+                            cursor: 'pointer' 
+                          }}
+                        >
+                          🔍 크게 보기
+                        </button>
+                      </div>
+                      <div style={{ 
+                        maxHeight: '120px', 
+                        overflowY: 'auto', 
+                        border: '1px solid #fecaca', 
+                        borderRadius: '8px', 
+                        padding: '0.65rem', 
+                        backgroundColor: '#fff5f5',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5rem'
+                      }}>
+                        {suspiciousLogs.map((log, index) => {
+                          let cleanText = log.copiedText.replace(/\[의심\]\s*/g, '');
+                          return (
+                            <div key={index} style={{ fontSize: '0.75rem', borderBottom: '1px solid #fee2e2', paddingBottom: '0.35rem' }}>
+                              <div style={{ color: '#b91c1c', fontWeight: 800, marginBottom: '0.15rem' }}>
+                                [{new Date(log.timestamp).toLocaleTimeString()}] 감지된 대량 텍스트:
+                              </div>
+                              <div style={{ 
+                                fontFamily: 'monospace', 
+                                color: '#374151', 
+                                backgroundColor: 'white', 
+                                padding: '0.35rem 0.5rem', 
+                                borderRadius: '4px',
+                                border: '1px solid #fecaca',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-all'
+                              }}>
+                                {cleanText}
+                              </div>
                             </div>
-                            <div style={{ 
-                              fontFamily: 'monospace', 
-                              color: '#374151', 
-                              backgroundColor: 'white', 
-                              padding: '0.35rem 0.5rem', 
-                              borderRadius: '4px',
-                              border: '1px solid #fecaca',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-all'
-                            }}>
-                              {log.copiedText}
-                            </div>
-                          </div>
-                        ))
-                      }
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* 실시간 상세 활동 기록 타임라인 (최신순 정렬) */}
                 <div style={{ marginTop: '0.5rem' }}>
@@ -2401,7 +2428,11 @@ export default function Dashboard() {
                           // Clean up and format action text
                           let rawText = log.copiedText || '';
                           rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                          rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                          if (rawText.includes('오프라인 대량 입력') && diff < 400) {
+                            rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                          } else {
+                            rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                          }
 
                           const isCopied = rawText.includes('[의심]');
                           const diff = log.charDiff !== undefined ? log.charDiff : 0;
@@ -2597,7 +2628,11 @@ export default function Dashboard() {
 
                       let rawText = log.copiedText || '';
                       rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                      rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                      if (rawText.includes('오프라인 대량 입력') && diff < 400) {
+                        rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                      } else {
+                        rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                      }
 
                       const isCopied = rawText.includes('[의심]');
 
@@ -2801,9 +2836,13 @@ export default function Dashboard() {
                   const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
                   let rawText = selectedPoint.copiedText || '';
                   rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
-                  rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                  if (rawText.includes('오프라인 대량 입력') && diff < 400) {
+                    rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                  } else {
+                    rawText = rawText.replace(/오프라인 대량 입력 감지/g, '대량 텍스트 입력(복붙 의심)');
+                  }
 
-                  const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && diff >= 100);
+                  const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && !rawText.startsWith('[슬라이드]') && !rawText.startsWith('[시각화]') && !rawText.startsWith('[수정]') && diff >= 180);
 
                   let displaySnippet = '';
                   if (rawText.startsWith('[추가]') || rawText.startsWith('[작성]')) {
