@@ -8,7 +8,8 @@ import {
   loadSpreadsheetData, 
   fetchSlideStats, 
   saveStudentsStatus, 
-  appendActivityLogs
+  appendActivityLogs,
+  executeWithRetry
 } from '@/lib/googleApi';
 
 // Helper to extract new text inserted/pasted by comparing snapshot strings
@@ -351,29 +352,18 @@ export default function Dashboard() {
     }
   };
 
-  // Load initial sheet data
-  const loadData = async () => {
-    setIsLoading(true);
-    setLoadErrorMsg('');
+  // Background live slide syncing & offline revision backfilling (non-blocking)
+  const syncLiveSlideStatsAndBackfill = async (baseStudents, baseLogs) => {
     try {
-      const fileMeta = await window.gapi.client.drive.files.get({
-        fileId: spreadsheetId,
-        fields: 'name'
-      });
-      const rawName = fileMeta.result.name;
-      const match = rawName.match(/SlideSight_DB_\[(.*?)\]/);
-      setClassTitle(match ? match[1] : rawName.replace('SlideSight_DB_', ''));
-
-      const { students: loadedStudents, logs: loadedLogs } = await loadSpreadsheetData(spreadsheetId);
-      
       const now = new Date();
       const missingLogs = [];
+      const updatedStudents = [...baseStudents];
       let studentsDataUpdated = false;
 
-      // Check current live slide stats and revision history for each student (chunked concurrency)
-      const CONCURRENCY = 5;
-      for (let i = 0; i < loadedStudents.length; i += CONCURRENCY) {
-        const chunk = loadedStudents.slice(i, i + CONCURRENCY);
+      // Check current live slide stats and revision history for each student (conservative concurrency)
+      const CONCURRENCY = 3;
+      for (let i = 0; i < updatedStudents.length; i += CONCURRENCY) {
+        const chunk = updatedStudents.slice(i, i + CONCURRENCY);
         await Promise.all(
           chunk.map(async (student) => {
             if (!student.slideId) return;
@@ -385,10 +375,12 @@ export default function Dashboard() {
               // 2) Fetch revision history from Google Drive
               let revisions = [];
               try {
-                const revResp = await window.gapi.client.drive.revisions.list({
-                  fileId: student.slideId,
-                  fields: 'revisions(id,modifiedTime)'
-                });
+                const revResp = await executeWithRetry(() =>
+                  window.gapi.client.drive.revisions.list({
+                    fileId: student.slideId,
+                    fields: 'revisions(id,modifiedTime)'
+                  })
+                );
                 revisions = revResp.result.revisions || [];
               } catch (revErr) {
                 console.warn(`Failed to check revisions for ${student.name}:`, revErr);
@@ -397,7 +389,7 @@ export default function Dashboard() {
               // Revisions index 0 is initial template copy creation.
               // index 1+ are actual user edit revisions.
               const userRevisions = revisions.slice(1);
-              const studentLogs = loadedLogs.filter(l => l.name === student.name);
+              const studentLogs = baseLogs.filter(l => l.name === student.name);
 
               // Determine if student has ever worked
               const hasWorked = 
@@ -413,14 +405,12 @@ export default function Dashboard() {
               if (!hasWorked) {
                 nextStatus = 'disconnected';
               } else {
-                // Determine latest active time
                 if (userRevisions.length > 0) {
                   latestTime = userRevisions[userRevisions.length - 1].modifiedTime;
                 } else if (!latestTime) {
                   latestTime = now.toISOString();
                 }
 
-                // If user edited within 5 minutes, status is 'active', otherwise 'idle'
                 const minutesSinceLastActive = (now.getTime() - new Date(latestTime).getTime()) / (1000 * 60);
                 if (student.status === 'suspicious') {
                   nextStatus = 'suspicious';
@@ -431,7 +421,6 @@ export default function Dashboard() {
                 }
               }
 
-              // Detect changes compared to existing spreadsheet record
               if (
                 student.status !== nextStatus ||
                 student.charCount !== stats.charCount ||
@@ -441,7 +430,6 @@ export default function Dashboard() {
                 studentsDataUpdated = true;
               }
 
-              // Update student object with actual live slide metrics
               student.charCount = stats.charCount;
               student.slideCount = stats.slideCount;
               student.imageCount = stats.imageCount;
@@ -453,7 +441,7 @@ export default function Dashboard() {
               student.revisionId = stats.revisionId;
               student.fullText = stats.fullText;
 
-              // 3) Backfill offline activities from userRevisions if missing from spreadsheet logs
+              // Backfill offline activities from userRevisions if missing from spreadsheet logs
               if (userRevisions.length > 0) {
                 const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
 
@@ -486,7 +474,7 @@ export default function Dashboard() {
                 }
               }
             } catch (studentErr) {
-              console.error(`Error analyzing live slide for ${student.name}:`, studentErr);
+              console.warn(`Error analyzing live slide for ${student.name}:`, studentErr);
             }
           })
         );
@@ -504,14 +492,13 @@ export default function Dashboard() {
 
       if (studentsDataUpdated || missingLogs.length > 0) {
         try {
-          await saveStudentsStatus(spreadsheetId, loadedStudents);
+          await saveStudentsStatus(spreadsheetId, updatedStudents);
         } catch (saveErr) {
           console.error('Failed to sync updated student statuses to sheet:', saveErr);
         }
       }
 
-      // Merge existing logs and missing offline logs, sort chronologically and restore charDiff
-      const mergedLogs = [...loadedLogs, ...missingLogs];
+      const mergedLogs = [...baseLogs, ...missingLogs];
       const timeSortedLogs = [...mergedLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
       
       const restoredLogs = [];
@@ -527,12 +514,55 @@ export default function Dashboard() {
         studentLastChars[log.name] = log.charCount;
       });
 
+      setStudents(updatedStudents);
+      setLogs(restoredLogs);
+    } catch (bgErr) {
+      console.warn('Background sync error (non-fatal):', bgErr);
+    }
+  };
+
+  // Load initial sheet data
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadErrorMsg('');
+    try {
+      const fileMeta = await executeWithRetry(() =>
+        window.gapi.client.drive.files.get({
+          fileId: spreadsheetId,
+          fields: 'name'
+        })
+      );
+      const rawName = fileMeta.result.name;
+      const match = rawName.match(/SlideSight_DB_\[(.*?)\]/);
+      setClassTitle(match ? match[1] : rawName.replace('SlideSight_DB_', ''));
+
+      // 1) First load existing sheet DB data and render immediately without delay
+      const { students: loadedStudents, logs: loadedLogs } = await loadSpreadsheetData(spreadsheetId);
+      
+      const restoredLogs = [];
+      const studentLastChars = {};
+      const timeSortedLogs = [...loadedLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      timeSortedLogs.forEach(log => {
+        const prevChar = studentLastChars[log.name] || 0;
+        const diff = log.charCount - prevChar;
+        restoredLogs.push({
+          ...log,
+          charDiff: diff
+        });
+        studentLastChars[log.name] = log.charCount;
+      });
+
       setStudents(loadedStudents);
       setLogs(restoredLogs);
-      
-      // Restore pollingTick to keep focusRatio scaling smooth after dashboard refresh
+      setIsLoading(false); // Render UI immediately with spreadsheet data!
+
       const avgTicks = loadedStudents.length > 0 ? Math.round(restoredLogs.length / loadedStudents.length) : 0;
       setPollingTick(avgTicks);
+
+      // 2) Asynchronously sync live slide stats and backfill offline revision history in background
+      syncLiveSlideStatsAndBackfill(loadedStudents, loadedLogs);
+
     } catch (err) {
       console.error('Failed to load spreadsheet data:', err);
       const isAuthError = 
@@ -548,8 +578,15 @@ export default function Dashboard() {
         setLoadErrorMsg('구글 로그인 인증 토큰이 만료되었습니다. 아래 버튼을 눌러 다시 로그인해 주세요.');
       } else {
         const errorDetail = err?.result?.error?.message || err?.message || '스프레드시트 DB 연결에 실패했습니다.';
-        setLoadErrorMsg(errorDetail);
-        alert(`스프레드시트 DB 데이터를 불러오는데 실패했습니다: ${errorDetail}`);
+        const isUnavailable = err?.status === 503 || err?.result?.error?.code === 503 || errorDetail.toLowerCase().includes('unavailable');
+
+        if (isUnavailable) {
+          setLoadErrorMsg('구글 클라우드 서버가 일시적으로 지연되고 있습니다. 잠시 후 상단의 [새로고침] 버튼을 눌러주세요.');
+          showAlert('구글 서버가 일시적으로 지연되고 있습니다 (Service Unavailable). 잠시 후 다시 시도해 주세요.', '구글 서비스 지연', 'warning');
+        } else {
+          setLoadErrorMsg(errorDetail);
+          showAlert(`스프레드시트 DB 데이터를 불러오는데 실패했습니다: ${errorDetail}`, '연결 오류', 'error');
+        }
       }
     } finally {
       setIsLoading(false);

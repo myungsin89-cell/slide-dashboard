@@ -19,6 +19,37 @@ export function saveGoogleConfig(clientId, apiKey) {
 let tokenClient = null;
 let googleAccessToken = null;
 
+/**
+ * Helper: Retry Google API operations with exponential backoff on transient errors (503, 500, 429)
+ */
+export async function executeWithRetry(apiFn, maxRetries = 3, initialDelayMs = 800) {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await apiFn();
+    } catch (err) {
+      attempt++;
+      const status = err?.status || err?.result?.error?.code;
+      const errMsg = err?.result?.error?.message || err?.message || '';
+      const isRetryable = 
+        status === 503 || 
+        status === 500 || 
+        status === 429 || 
+        errMsg.toLowerCase().includes('unavailable') || 
+        errMsg.toLowerCase().includes('rate limit') ||
+        errMsg.toLowerCase().includes('backend error') ||
+        errMsg.toLowerCase().includes('transient');
+
+      if (attempt >= maxRetries || !isRetryable) {
+        throw err;
+      }
+      const delay = initialDelayMs * Math.pow(2, attempt - 1);
+      console.warn(`[GoogleAPI] Transient error (${status || errMsg}). Retrying in ${delay}ms (attempt ${attempt}/${maxRetries})...`);
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+}
+
 // Initialize gapi and accounts
 export function initGoogleSDKs(onSuccess, onFailure) {
   if (typeof window === 'undefined') return;
@@ -349,9 +380,11 @@ export async function duplicateSlideForStudents(templateId, studentsList, spread
  */
 export async function fetchSlideStats(slideId, keywords = []) {
   // 교사 토큰 또는 학생 공개 조회용 (학생은 구글 API 키 및 공개 보기 권한을 통해 조회)
-  const response = await window.gapi.client.slides.presentations.get({
-    presentationId: slideId
-  });
+  const response = await executeWithRetry(() =>
+    window.gapi.client.slides.presentations.get({
+      presentationId: slideId
+    })
+  );
 
   const presentation = response.result;
   const slides = presentation.slides || [];
@@ -487,10 +520,12 @@ export async function fetchAssignmentsList(className = null) {
  */
 export async function loadSpreadsheetData(spreadsheetId) {
   // students 시트 조회 (A1:N100 범위)
-  const studentResp = await window.gapi.client.sheets.spreadsheets.values.get({
-    spreadsheetId: spreadsheetId,
-    range: 'students!A2:N100'
-  });
+  const studentResp = await executeWithRetry(() =>
+    window.gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetId,
+      range: 'students!A2:N100'
+    })
+  );
 
   const studentRows = studentResp.result.values || [];
   const students = studentRows.map(row => ({
@@ -511,10 +546,12 @@ export async function loadSpreadsheetData(spreadsheetId) {
   }));
 
   // activity_logs 시트 조회 (A2:G5000 범위)
-  const logsResp = await window.gapi.client.sheets.spreadsheets.values.get({
-    spreadsheetId: spreadsheetId,
-    range: 'activity_logs!A2:G5000'
-  });
+  const logsResp = await executeWithRetry(() =>
+    window.gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetId,
+      range: 'activity_logs!A2:G5000'
+    })
+  );
 
   const logRows = logsResp.result.values || [];
   const logs = logRows.map(row => ({
@@ -556,14 +593,16 @@ export async function saveStudentsStatus(spreadsheetId, students) {
     s.teacherFeedback || ''
   ]);
 
-  await window.gapi.client.sheets.spreadsheets.values.update({
-    spreadsheetId: spreadsheetId,
-    range: range,
-    valueInputOption: 'RAW',
-    resource: {
-      values: values
-    }
-  });
+  await executeWithRetry(() =>
+    window.gapi.client.sheets.spreadsheets.values.update({
+      spreadsheetId: spreadsheetId,
+      range: range,
+      valueInputOption: 'RAW',
+      resource: {
+        values: values
+      }
+    })
+  );
 }
 
 /**
@@ -583,15 +622,17 @@ export async function appendActivityLogs(spreadsheetId, logs) {
     l.copiedText || ''
   ]);
 
-  await window.gapi.client.sheets.spreadsheets.values.append({
-    spreadsheetId: spreadsheetId,
-    range: 'activity_logs!A2',
-    valueInputOption: 'RAW',
-    insertDataOption: 'INSERT_ROWS',
-    resource: {
-      values: values
-    }
-  });
+  await executeWithRetry(() =>
+    window.gapi.client.sheets.spreadsheets.values.append({
+      spreadsheetId: spreadsheetId,
+      range: 'activity_logs!A2',
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: values
+      }
+    })
+  );
 }
 
 /**
