@@ -13,6 +13,7 @@ import {
   deleteAssignment,
   extractSlideId
 } from '@/lib/googleApi';
+import MadeByStamp from '@/components/MadeByStamp';
 
 export default function ClassWorkspace() {
   const params = useParams();
@@ -56,6 +57,7 @@ export default function ClassWorkspace() {
 
   // Create Assignment Modal States
   const [showCreateAssignmentModal, setShowCreateAssignmentModal] = useState(false);
+  const [assignmentType, setAssignmentType] = useState('slides'); // 'slides', 'docs', 'forms'
   const [assignmentName, setAssignmentName] = useState('');
   const [templateInput, setTemplateInput] = useState('');
   const [keywordsInput, setKeywordsInput] = useState('');
@@ -237,6 +239,7 @@ export default function ClassWorkspace() {
       if (parsedKeywords.length > 0) {
         localStorage.setItem(`keywords_${spreadsheetId}`, JSON.stringify(parsedKeywords));
       }
+      localStorage.setItem(`tool_type_${spreadsheetId}`, assignmentType);
 
       setCreationStep('done');
       router.push(`/dashboard/${spreadsheetId}`);
@@ -249,9 +252,21 @@ export default function ClassWorkspace() {
 
   if (sdkStatus === 'loading') {
     return (
-      <div style={{ textAlign: 'center', padding: '5rem 0' }}>
-        <div style={{ fontSize: '3rem', animation: 'spin 2s linear infinite' }}>⏳</div>
-        <h2 style={{ marginTop: '1.5rem', fontWeight: 800 }}>학급 정보 불러오는 중...</h2>
+      <div style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem 1rem', textAlign: 'center' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1.25rem' }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="2" x2="12" y2="6" />
+            <line x1="12" y1="18" x2="12" y2="22" />
+            <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+            <line x1="2" y1="12" x2="6" y2="12" />
+            <line x1="18" y1="12" x2="22" y2="12" />
+            <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+            <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+          </svg>
+        </div>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>학급 정보 불러오는 중...</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '0.45rem' }}>구글 드라이브에서 학급 데이터를 연결하고 있습니다.</p>
       </div>
     );
   }
@@ -291,272 +306,457 @@ export default function ClassWorkspace() {
               fontSize: '0.9rem',
               paddingRight: '0.75rem',
               borderRight: '1px solid var(--border-card)',
-              outline: 'none'
+              outline: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem'
             }}
             onClick={() => router.push('/')}
           >
-            ◀ 학급 목록
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            <span>학급 목록</span>
           </button>
-          <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginLeft: '0.5rem' }}>
-            <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-            <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-            <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-            <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-            <rect x="18" y="24" width="8" height="2" fill="white"/>
-            <rect x="18" y="28" width="12" height="2" fill="white"/>
-          </svg>
-          <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-            {className}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.4rem' }}>
+            <svg width="20" height="20" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+              {className}
+            </span>
+          </div>
           
-          {/* Compact Student Count Pill with Slide Drawer Toggle */}
+          {/* Sleek Modern Linear Student Count Pill */}
           <button
             type="button"
             title="클릭하여 학생 명단 서랍(사이드바)을 엽니다"
             onClick={() => setShowRosterDrawer(true)}
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: '#f8fafc',
-              border: '1px solid #cbd5e1',
-              color: '#334155',
+              gap: '0.45rem',
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              color: 'var(--brand-green-dark)',
               fontSize: '0.82rem',
               fontWeight: 700,
-              padding: '0.35rem 0.75rem',
-              borderRadius: '8px',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '999px',
               cursor: 'pointer',
               marginLeft: '0.5rem',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 2px rgba(16, 185, 129, 0.06)',
               transition: 'all 0.15s ease'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#ecfdf5';
-              e.currentTarget.style.borderColor = '#10b981';
-              e.currentTarget.style.color = '#065f46';
+              e.currentTarget.style.backgroundColor = '#dcfce7';
+              e.currentTarget.style.borderColor = '#86efac';
+              e.currentTarget.style.transform = 'translateY(-1px)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#f8fafc';
-              e.currentTarget.style.borderColor = '#cbd5e1';
-              e.currentTarget.style.color = '#334155';
+              e.currentTarget.style.backgroundColor = '#f0fdf4';
+              e.currentTarget.style.borderColor = '#bbf7d0';
+              e.currentTarget.style.transform = 'translateY(0)';
             }}
           >
-            {/* Left Sidebar / Drawer Icon */}
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--brand-green-dark)' }}>
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="9" y1="3" x2="9" y2="21" />
+            {/* Linear Users SVG Icon */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
-            
             <span>학생 <strong>{students.length}명</strong></span>
-            
-            <span style={{ 
-              fontSize: '0.72rem', 
-              fontWeight: 800, 
-              backgroundColor: 'var(--brand-green-dark)', 
-              color: 'white', 
-              padding: '0.15rem 0.5rem', 
-              borderRadius: '4px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.2rem'
-            }}>
-              명단 보기
-            </span>
-          </button>
-        </div>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          <button 
-            className="btn-primary"
-            style={{ padding: '0.45rem 1.1rem', fontSize: '0.85rem' }}
-            onClick={() => setShowCreateAssignmentModal(true)}
-          >
-            + 새 수업 과제 만들기
+            <span style={{ fontSize: '0.72rem', opacity: 0.75, marginLeft: '0.15rem' }}>명단 열기</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
           </button>
         </div>
       </header>
 
-      {/* 2. Full-width Main container for Assignments */}
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '2rem 2rem' }}>
-        <div>
-          {/* Header row with assignment title */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              이 학급의 수업 과제 목록 <span style={{ color: 'var(--brand-green-dark)', fontSize: '1rem' }}>({assignments.length}개)</span>
-            </h2>
+      {/* 2. Main content body matching page.js (Left Sidebar + Right Workspace) */}
+      <main style={{ width: '100%', maxWidth: '1600px', margin: '0 auto', padding: '1.75rem 2rem' }}>
+        {isLoading ? (
+          <div style={{ padding: '6rem 1rem', textAlign: 'center', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '48px', height: '48px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1rem' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="2" x2="12" y2="6" />
+                <line x1="12" y1="18" x2="12" y2="22" />
+                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                <line x1="2" y1="12" x2="6" y2="12" />
+                <line x1="18" y1="12" x2="22" y2="12" />
+                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+              </svg>
+            </div>
+            <h3 style={{ fontWeight: 800, color: 'var(--text-main)', margin: 0, fontSize: '1.2rem' }}>과제 목록 불러오는 중...</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '0.45rem' }}>구글 드라이브에서 등록된 수업 과제를 확인하고 있습니다.</p>
           </div>
-
-          <div style={{ width: '100%' }}>
-
-            {isLoading ? (
-              <div className="card" style={{ padding: '4rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                과제 목록을 불러오는 중...
-              </div>
-            ) : assignments.length === 0 ? (
-              <div 
-                className="card" 
-                style={{ 
-                  padding: '4rem 2rem', 
-                  textAlign: 'center', 
-                  borderStyle: 'dashed', 
-                  borderWidth: '2px', 
-                  borderColor: 'var(--border-card)',
-                  backgroundColor: 'transparent',
+        ) : (
+          /* Modern 2-Column Dashboard (Left Guide/Action Panel + Right Assignments Grid) */
+          <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            
+            {/* Left Panel: Assignment Creation Guide & Action (320px fixed width) */}
+            <div style={{ flex: '0 0 320px', width: '320px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              
+              {/* Main Single Create Assignment Button */}
+              <button
+                type="button"
+                className="btn-primary"
+                style={{
+                  width: '100%',
+                  padding: '1rem 1.25rem',
+                  fontSize: '1rem',
+                  fontWeight: 800,
+                  borderRadius: '14px',
+                  boxShadow: '0 6px 16px rgba(22, 101, 52, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.6rem',
                   cursor: 'pointer'
                 }}
                 onClick={() => setShowCreateAssignmentModal(true)}
               >
-                <strong style={{ display: 'block', fontSize: '1.1rem', color: 'var(--text-main)' }}>아직 등록된 수업 과제가 없습니다.</strong>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-                  클릭하여 첫 번째 구글 슬라이드 과제를 배부해 보세요.
-                </span>
+                <span style={{ fontSize: '1.3rem', lineHeight: '1' }}>＋</span> 새 수업 과제 만들기
+              </button>
+
+              {/* Step-by-Step Assignment Guide Card */}
+              <div className="card" style={{ padding: '1.5rem', borderRadius: '18px', backgroundColor: '#ffffff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand-green-dark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 900, color: 'var(--text-main)' }}>
+                    수업 과제 안내
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', gap: '0.65rem' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                      1
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                      <strong>템플릿 링크:</strong> 학생들에게 배부할 구글 슬라이드나 독스의 공유 링크를 복사합니다.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.65rem' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                      2
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                      <strong>원클릭 자동 배부:</strong> 과제명과 핵심 키워드를 적으면 학생 {students.length}명의 개인 슬라이드가 자동 복사됩니다.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.65rem' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                      3
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                      <strong>실시간 모니터링:</strong> 과제 카드를 눌러 학생들의 슬라이드 작성 과정과 지표를 실시간 관찰하세요.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.65rem' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                      4
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                      <strong>모니터링 일시 중지:</strong> 수업이 끝난 과제는 모니터링을 잠시 중지해 기록을 안전하게 보관할 수 있습니다.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.65rem' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                      5
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                      <strong>과제 일괄 삭제:</strong> 과제 카드의 삭제(×)를 누르면 구글 드라이브에 생성된 활동 기록 데이터베이스도 한 번에 함께 안전하게 삭제됩니다.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>총 배부 과제</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--brand-green-dark)', backgroundColor: '#f0fdf4', padding: '0.15rem 0.6rem', borderRadius: '6px' }}>
+                    {assignments.length}개
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
-                {/* Add assignment card */}
+
+              {/* Quick Roster Edit Link */}
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEditRosterModal(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    color: '#64748b',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: '0.3rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  <span>{className} 학생 명단 수정하기</span>
+                </button>
+              </div>
+
+            </div>
+
+            {/* Right Main Area: Clean Assignments Grid (Fills 100% of remaining width) */}
+            <div style={{ flex: 1, minWidth: '320px' }}>
+              {assignments.length === 0 ? (
+                /* Empty State */
                 <div 
                   className="card"
                   style={{ 
                     borderStyle: 'dashed', 
                     borderWidth: '2px', 
-                    borderColor: 'var(--brand-green-dark)', 
+                    borderColor: '#a7f3d0', 
                     display: 'flex', 
                     flexDirection: 'column', 
                     alignItems: 'center', 
                     justifyContent: 'center', 
-                    minHeight: '160px', 
+                    padding: '4.5rem 2rem', 
                     cursor: 'pointer',
-                    backgroundColor: 'transparent'
+                    backgroundColor: '#f0fdf4',
+                    borderRadius: '18px',
+                    transition: 'all 0.2s ease'
                   }}
                   onClick={() => setShowCreateAssignmentModal(true)}
                 >
-                  <span style={{ fontSize: '2rem', color: 'var(--brand-green-dark)', fontWeight: '300' }}>＋</span>
-                  <span style={{ fontWeight: 800, color: 'var(--brand-green-dark)', marginTop: '0.5rem' }}>새 과제 만들어 배부하기</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--brand-green-dark)', marginBottom: '1rem' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, lineHeight: 1 }}>＋</span>
+                  </div>
+                  <span style={{ fontWeight: 900, color: 'var(--brand-green-dark)', fontSize: '1.2rem' }}>첫 번째 수업 과제를 만들어 보세요</span>
+                  <span style={{ fontSize: '0.88rem', color: '#059669', marginTop: '0.45rem' }}>구글 슬라이드/독스 링크를 입력하면 학생별 과제가 1초 만에 자동 생성됩니다.</span>
                 </div>
+              ) : (
+                /* Assignment Cards Grid - Soft Light Green Themed matching page.js */
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+                  gap: '1.25rem' 
+                }}>
+                  {assignments.map(ass => {
+                    const isClosed = typeof window !== 'undefined' ? (localStorage.getItem(`closed_${ass.id}`) === 'true') : false;
 
-                {/* Assignment item list */}
-                {assignments.map(ass => {
-                  const isClosed = typeof window !== 'undefined' ? (localStorage.getItem(`closed_${ass.id}`) === 'true') : false;
-
-                  return (
-                    <div 
-                      key={ass.id}
-                      className="card"
-                      style={{ 
-                        display: 'flex', 
-                        flexDirection: 'column', 
-                        justifyContent: 'space-between',
-                        minHeight: '160px', 
-                        cursor: 'pointer',
-                        position: 'relative',
-                        borderColor: isClosed ? '#cbd5e1' : 'var(--border-card)',
-                        backgroundColor: isClosed ? '#fafafa' : 'white'
-                      }}
-                      onClick={() => router.push(`/dashboard/${ass.id}`)}
-                    >
-                      {/* Delete (X) button */}
-                      <button
-                        type="button"
-                        title="과제 삭제"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAssignmentToDelete(ass);
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: '0.65rem',
-                          right: '0.65rem',
-                          width: '24px',
-                          height: '24px',
-                          borderRadius: '50%',
-                          border: '1px solid transparent',
-                          backgroundColor: 'transparent',
-                          color: '#94a3b8',
-                          fontSize: '1.1rem',
-                          fontWeight: 900,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                    return (
+                      <div 
+                        key={ass.id}
+                        className="card"
+                        style={{ 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          justifyContent: 'space-between',
+                          minHeight: '155px', 
                           cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          zIndex: 10
+                          position: 'relative',
+                          borderRadius: '18px',
+                          padding: '1.5rem',
+                          transition: 'all 0.2s ease',
+                          border: isClosed ? '1.5px solid #cbd5e1' : '1.5px solid #fef08a',
+                          backgroundColor: isClosed ? '#f8fafc' : '#fefce8',
+                          boxShadow: isClosed ? '0 2px 4px rgba(0,0,0,0.02)' : '0 2px 8px rgba(245, 158, 11, 0.08)'
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#fee2e2';
-                          e.currentTarget.style.color = '#ef4444';
-                          e.currentTarget.style.borderColor = '#fca5a5';
+                          e.currentTarget.style.transform = 'translateY(-3px)';
+                          e.currentTarget.style.boxShadow = isClosed ? '0 12px 20px -4px rgba(0, 0, 0, 0.08)' : '0 12px 20px -4px rgba(245, 158, 11, 0.18)';
+                          e.currentTarget.style.borderColor = isClosed ? '#94a3b8' : '#facc15';
+                          e.currentTarget.style.backgroundColor = isClosed ? '#f1f5f9' : '#fef9c3';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = '#94a3b8';
-                          e.currentTarget.style.borderColor = 'transparent';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = isClosed ? '0 2px 4px rgba(0,0,0,0.02)' : '0 2px 8px rgba(245, 158, 11, 0.08)';
+                          e.currentTarget.style.borderColor = isClosed ? '#cbd5e1' : '#fef08a';
+                          e.currentTarget.style.backgroundColor = isClosed ? '#f8fafc' : '#fefce8';
                         }}
+                        onClick={() => router.push(`/dashboard/${ass.id}`)}
                       >
-                        &times;
-                      </button>
+                        {/* Delete (X) button */}
+                        <button
+                          type="button"
+                          title="과제 삭제"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAssignmentToDelete(ass);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '1rem',
+                            right: '1rem',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            border: '1px solid transparent',
+                            backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                            color: '#94a3b8',
+                            fontSize: '1.15rem',
+                            fontWeight: 900,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                            zIndex: 10
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fee2e2';
+                            e.currentTarget.style.color = '#ef4444';
+                            e.currentTarget.style.borderColor = '#fca5a5';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.85)';
+                            e.currentTarget.style.color = '#94a3b8';
+                            e.currentTarget.style.borderColor = 'transparent';
+                          }}
+                        >
+                          &times;
+                        </button>
 
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem', paddingRight: '1.5rem' }}>
-                          <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill={isClosed ? '#94a3b8' : '#F4B400'}/>
-                            <path d="M40 14L30 6V14H40Z" fill={isClosed ? '#64748b' : '#DB9A00'}/>
-                            <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-                            <rect x="16" y="22" width="16" height="10" fill={isClosed ? '#94a3b8' : '#F4B400'}/>
-                            <rect x="18" y="24" width="8" height="2" fill="white"/>
-                            <rect x="18" y="28" width="12" height="2" fill="white"/>
-                          </svg>
-                          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: isClosed ? '#475569' : 'var(--text-main)' }}>{ass.name}</h3>
+                        <div>
+                          {/* Status Badge */}
+                          <div style={{ marginBottom: '0.65rem' }}>
+                            {isClosed ? (
+                              <span style={{ 
+                                fontSize: '0.7rem', 
+                                fontWeight: 800, 
+                                backgroundColor: '#f1f5f9', 
+                                color: '#64748b', 
+                                padding: '0.15rem 0.5rem', 
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                border: '1px solid #e2e8f0'
+                              }}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                </svg>
+                                모니터링 종료됨 (기록 보관)
+                              </span>
+                            ) : (
+                              <span style={{ 
+                                fontSize: '0.7rem', 
+                                fontWeight: 800, 
+                                backgroundColor: '#ffffff', 
+                                color: '#b45309', 
+                                padding: '0.15rem 0.55rem', 
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                border: '1px solid #fde047',
+                                boxShadow: '0 1px 2px rgba(245, 158, 11, 0.08)'
+                              }}>
+                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+                                실시간 진행 중
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Assignment Title with Google Slides Icon in front */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.45rem', paddingRight: '2rem' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: '#ffffff',
+                              border: isClosed ? '1px solid #e2e8f0' : '1px solid #fef08a',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+                              filter: isClosed ? 'grayscale(0.6)' : 'none'
+                            }}>
+                              <img src="/google-slides.svg" alt="Google Slides" style={{ width: '22px', height: '22px', objectFit: 'contain' }} />
+                            </div>
+                            <h3 style={{ 
+                              fontSize: '1.25rem', 
+                              fontWeight: 900, 
+                              color: 'var(--text-main)', 
+                              margin: 0,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {ass.name}
+                            </h3>
+                          </div>
+
+                          <p style={{ color: isClosed ? '#64748b' : '#854d0e', fontSize: '0.82rem', margin: 0, fontWeight: 700 }}>
+                            구글 슬라이드
+                          </p>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.35rem' }}>
-                          {isClosed ? (
-                            <span style={{ 
-                              fontSize: '0.72rem', 
-                              fontWeight: 800, 
-                              color: '#475569', 
-                              backgroundColor: '#f1f5f9', 
-                              border: '1px solid #cbd5e1', 
-                              padding: '0.15rem 0.45rem', 
-                              borderRadius: '4px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.25rem'
-                            }}>
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                              </svg>
-                              모니터링 종료됨
-                            </span>
-                          ) : (
-                            <span style={{ 
-                              fontSize: '0.72rem', 
-                              fontWeight: 800, 
-                              color: 'var(--brand-green-dark)', 
-                              backgroundColor: 'var(--bg-light-green)', 
-                              padding: '0.15rem 0.45rem', 
-                              borderRadius: '4px'
-                            }}>
-                              ● 실시간 진행 중
-                            </span>
-                          )}
-
-                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            {new Date(ass.createdTime).toLocaleDateString('ko-KR')}
+                        <div style={{ 
+                          marginTop: '1.25rem', 
+                          paddingTop: '0.85rem', 
+                          borderTop: isClosed ? '1px solid #e2e8f0' : '1px solid rgba(254, 240, 138, 0.8)', 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center' 
+                        }}>
+                          <span style={{ 
+                            fontSize: '0.82rem', 
+                            fontWeight: 800, 
+                            color: isClosed ? '#64748b' : '#854d0e'
+                          }}>
+                            {isClosed ? '활동 기록 열람' : '대시보드 열기'}
+                          </span>
+                          <span style={{ 
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: '#ffffff',
+                            color: isClosed ? '#64748b' : '#b45309',
+                            border: isClosed ? '1px solid #cbd5e1' : '1px solid #fde047',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                          }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
                           </span>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: '0.82rem', color: isClosed ? '#64748b' : 'var(--brand-green-dark)', fontWeight: 'bold', marginTop: '1rem' }}>
-                        {isClosed ? '기록 및 리포트 열람 ➔' : '실시간 현황 보기 ➔'}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
-        </div>
+        )}
+
+        {/* Subtle Signature Stamp */}
+        <MadeByStamp />
       </main>
 
       {/* Roster Edit Modal */}
@@ -609,20 +809,135 @@ export default function ClassWorkspace() {
           <div className="custom-modal-content" style={{ maxWidth: '550px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-                <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-                <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-                <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-                <rect x="18" y="24" width="8" height="2" fill="white"/>
-                <rect x="18" y="28" width="12" height="2" fill="white"/>
+                <ellipse cx="16" cy="30" rx="6.5" ry="9.5" transform="rotate(-15 16 30)" fill="#4285F4"/>
+                <circle cx="10" cy="16.5" r="2" fill="#4285F4"/>
+                <circle cx="14" cy="14.5" r="2.2" fill="#34A853"/>
+                <circle cx="18.5" cy="15" r="2" fill="#34A853"/>
+                <circle cx="22.5" cy="17" r="1.8" fill="#34A853"/>
+                <ellipse cx="32" cy="20" rx="6.5" ry="9.5" transform="rotate(15 32 20)" fill="#EA4335"/>
+                <circle cx="26" cy="6.5" r="2" fill="#FBBC05"/>
+                <circle cx="30.5" cy="4.5" r="2.2" fill="#FBBC05"/>
+                <circle cx="35" cy="5" r="2" fill="#EA4335"/>
+                <circle cx="39" cy="7" r="1.8" fill="#EA4335"/>
               </svg>
               새 수업 과제 만들기
             </div>
             
             <form onSubmit={handleCreateAssignment}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  현재 학급(<strong>{className}</strong>)의 학생 <strong>{students.length}명</strong>에게 구글 슬라이드를 일괄 복사해 배부합니다.
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                {/* Tool Selector (Google Slides, Google Docs, Google Forms) */}
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '0.5rem' }}>
+                    과제 도구 선택
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.65rem' }}>
+                    {/* Google Slides (Default & Active) */}
+                    <button
+                      type="button"
+                      onClick={() => setAssignmentType('slides')}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.85rem 0.5rem',
+                        borderRadius: '12px',
+                        border: assignmentType === 'slides' ? '2px solid #eab308' : '1px solid var(--border-card)',
+                        backgroundColor: assignmentType === 'slides' ? '#fefce8' : '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: assignmentType === 'slides' ? '0 4px 12px rgba(234, 179, 8, 0.15)' : 'none'
+                      }}
+                    >
+                      <img src="/google-slides.svg" alt="Google Slides" style={{ width: '32px', height: '32px', marginBottom: '0.45rem' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#854d0e' }}>구글 슬라이드</span>
+                      <span style={{ 
+                        marginTop: '0.3rem', 
+                        fontSize: '0.68rem', 
+                        fontWeight: 700, 
+                        backgroundColor: '#fef08a', 
+                        color: '#a16207', 
+                        padding: '0.1rem 0.45rem', 
+                        borderRadius: '4px' 
+                      }}>
+                        기본 지원
+                      </span>
+                    </button>
+
+                    {/* Google Docs (Upcoming) */}
+                    <button
+                      type="button"
+                      onClick={() => showAlert('구글 문서(Docs) 과제 연동은 차기 업데이트에서 지원될 예정입니다.', '업데이트 예정', 'info')}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.85rem 0.5rem',
+                        borderRadius: '12px',
+                        border: '1px dashed #cbd5e1',
+                        backgroundColor: '#f8fafc',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        opacity: 0.85
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    >
+                      <img src="/google-docs.svg" alt="Google Docs" style={{ width: '32px', height: '32px', marginBottom: '0.45rem', filter: 'grayscale(0.2)' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>구글 문서</span>
+                      <span style={{ 
+                        marginTop: '0.3rem', 
+                        fontSize: '0.68rem', 
+                        fontWeight: 700, 
+                        backgroundColor: '#e2e8f0', 
+                        color: '#64748b', 
+                        padding: '0.1rem 0.45rem', 
+                        borderRadius: '4px' 
+                      }}>
+                        업데이트 예정
+                      </span>
+                    </button>
+
+                    {/* Google Forms (Upcoming) */}
+                    <button
+                      type="button"
+                      onClick={() => showAlert('구글 설문지(Forms) 과제 연동은 차기 업데이트에서 지원될 예정입니다.', '업데이트 예정', 'info')}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.85rem 0.5rem',
+                        borderRadius: '12px',
+                        border: '1px dashed #cbd5e1',
+                        backgroundColor: '#f8fafc',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        opacity: 0.85
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    >
+                      <img src="/google-forms.svg" alt="Google Forms" style={{ width: '32px', height: '32px', marginBottom: '0.45rem', filter: 'grayscale(0.2)' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>구글 폼</span>
+                      <span style={{ 
+                        marginTop: '0.3rem', 
+                        fontSize: '0.68rem', 
+                        fontWeight: 700, 
+                        backgroundColor: '#e2e8f0', 
+                        color: '#64748b', 
+                        padding: '0.1rem 0.45rem', 
+                        borderRadius: '4px' 
+                      }}>
+                        업데이트 예정
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.83rem', color: 'var(--text-muted)', margin: 0, padding: '0.5rem 0.75rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  현재 학급(<strong>{className}</strong>)의 선택된 학생들에게 구글 슬라이드를 일괄 복사해 배부합니다.
                 </p>
                 
                 <div className="horizontal-form-row">

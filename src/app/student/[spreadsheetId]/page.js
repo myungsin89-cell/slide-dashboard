@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import MadeByStamp from '@/components/MadeByStamp';
 
 export default function StudentPortal() {
   const params = useParams();
@@ -113,14 +114,21 @@ export default function StudentPortal() {
       {/* STEP 1: 4-digit Access Code Gateway */}
       {!isCodeVerified ? (
         <div className="card" style={{ padding: '2.5rem 2rem', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.08)' }}>
-          <div style={{ display: 'inline-flex', marginBottom: '1rem' }}>
-            <svg width="60" height="60" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-              <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-              <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-              <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-              <rect x="18" y="24" width="8" height="2" fill="white"/>
-              <rect x="18" y="28" width="12" height="2" fill="white"/>
+          <div style={{ display: 'inline-flex', marginBottom: '1.25rem' }}>
+            <svg width="56" height="56" viewBox="0 0 48 48">
+              {/* Left Footprint (Blue & Green) */}
+              <ellipse cx="16" cy="30" rx="6.5" ry="9.5" transform="rotate(-15 16 30)" fill="#4285F4"/>
+              <circle cx="10" cy="16.5" r="2" fill="#4285F4"/>
+              <circle cx="14" cy="14.5" r="2.2" fill="#34A853"/>
+              <circle cx="18.5" cy="15" r="2" fill="#34A853"/>
+              <circle cx="22.5" cy="17" r="1.8" fill="#34A853"/>
+
+              {/* Right Footprint (Red & Yellow) */}
+              <ellipse cx="32" cy="20" rx="6.5" ry="9.5" transform="rotate(15 32 20)" fill="#EA4335"/>
+              <circle cx="26" cy="6.5" r="2" fill="#FBBC05"/>
+              <circle cx="30.5" cy="4.5" r="2.2" fill="#FBBC05"/>
+              <circle cx="35" cy="5" r="2" fill="#EA4335"/>
+              <circle cx="39" cy="7" r="1.8" fill="#EA4335"/>
             </svg>
           </div>
 
@@ -221,8 +229,20 @@ export default function StudentPortal() {
           </div>
 
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-              학생 명단을 불러오고 있습니다...
+            <div style={{ textAlign: 'center', padding: '3.5rem 0' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', borderRadius: '50%', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '0.85rem' }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="2" x2="12" y2="6" />
+                  <line x1="12" y1="18" x2="12" y2="22" />
+                  <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                  <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                  <line x1="2" y1="12" x2="6" y2="12" />
+                  <line x1="18" y1="12" x2="22" y2="12" />
+                  <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                  <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+                </svg>
+              </div>
+              <p style={{ fontWeight: 800, color: 'var(--text-main)', margin: 0, fontSize: '0.95rem' }}>학생 명단을 불러오고 있습니다...</p>
             </div>
           ) : error ? (
             <div style={{ textAlign: 'center', padding: '2rem 0', color: '#b91c1c', backgroundColor: '#fee2e2', borderRadius: '12px', border: '1px solid #fca5a5' }}>
@@ -299,6 +319,9 @@ export default function StudentPortal() {
           </div>
         </div>
       )}
+
+      {/* Subtle Signature Stamp */}
+      <MadeByStamp style={{ marginTop: '1.5rem', paddingBottom: '0.5rem' }} />
 
       {/* Global Custom Alert Modal */}
       {alertConfig && alertConfig.isOpen && (

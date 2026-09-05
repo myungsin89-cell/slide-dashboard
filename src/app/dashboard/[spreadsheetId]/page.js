@@ -11,6 +11,7 @@ import {
   appendActivityLogs,
   executeWithRetry
 } from '@/lib/googleApi';
+import MadeByStamp from '@/components/MadeByStamp';
 
 // Helper to extract new text inserted/pasted by comparing snapshot strings
 function extractDiffText(prev = '', curr = '') {
@@ -151,24 +152,115 @@ export default function Dashboard() {
   const [logs, setLogs] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [newKeywordInput, setNewKeywordInput] = useState('');
+  const keywordsRef = useRef([]);
+  const pollStudentSlidesRef = useRef(null);
+
+  useEffect(() => {
+    keywordsRef.current = keywords;
+  }, [keywords]);
+
+  // Helper to test if a full presentation text contains keywords (case & space-insensitive)
+  const matchKeywordsInText = (text, keywordList) => {
+    if (!text) return [];
+    const normalized = text.toLowerCase();
+    const compact = normalized.replace(/\s+/g, '');
+    const matched = [];
+    keywordList.forEach(kw => {
+      const trimmed = (kw || '').trim();
+      if (!trimmed) return;
+      const lowerKw = trimmed.toLowerCase();
+      const compactKw = lowerKw.replace(/\s+/g, '');
+      if (
+        normalized.includes(lowerKw) ||
+        (compactKw.length >= 2 && compact.includes(compactKw))
+      ) {
+        matched.push(trimmed);
+      }
+    });
+    return matched;
+  };
 
   const handleAddKeyword = () => {
-    const trimmed = newKeywordInput.trim();
-    if (!trimmed) return;
-    if (keywords.includes(trimmed)) {
+    const raw = newKeywordInput.trim();
+    if (!raw) return;
+
+    // 쉼표(,)나 엔터로 여러 개를 한 번에 입력해도 각각의 키워드로 자동 분리
+    const inputKeywords = raw
+      .split(/[\n,]+/)
+      .map(k => k.trim())
+      .filter(Boolean);
+
+    if (inputKeywords.length === 0) return;
+
+    const newOnes = inputKeywords.filter(k => !keywords.includes(k));
+    if (newOnes.length === 0) {
       showAlert('이미 등록된 키워드입니다.', '키워드 중복', 'warning');
       return;
     }
-    const updated = [...keywords, trimmed];
+
+    const updated = [...keywords, ...newOnes];
     setKeywords(updated);
+    keywordsRef.current = updated;
     localStorage.setItem(`keywords_${spreadsheetId}`, JSON.stringify(updated));
     setNewKeywordInput('');
+
+    // 1) 이미 메모리에 수집된 학생들의 슬라이드 텍스트(fullText)를 즉시 재검사하여 0초 딜레이로 화면 즉시 갱신
+    let anyTextAvailable = false;
+    const reevaluatedStudents = (studentsRef.current || []).map(st => {
+      if (st.fullText) {
+        anyTextAvailable = true;
+        const matched = matchKeywordsInText(st.fullText, updated);
+        return {
+          ...st,
+          keywordsUsed: matched,
+          keywordCount: matched.length
+        };
+      }
+      return st;
+    });
+
+    if (anyTextAvailable) {
+      setStudents(reevaluatedStudents);
+      studentsRef.current = reevaluatedStudents;
+      saveStudentsStatus(spreadsheetId, reevaluatedStudents).catch(console.error);
+    }
+
+    // 2) 구글 슬라이드 API를 즉시 백그라운드 호출하여 최신 텍스트와 키워드 완전 동기화
+    if (pollStudentSlidesRef.current) {
+      pollStudentSlidesRef.current(updated);
+    }
   };
 
   const handleRemoveKeyword = (kw) => {
     const updated = keywords.filter(k => k !== kw);
     setKeywords(updated);
+    keywordsRef.current = updated;
     localStorage.setItem(`keywords_${spreadsheetId}`, JSON.stringify(updated));
+
+    // 1) 이미 메모리에 수집된 학생들의 슬라이드 텍스트(fullText)를 즉시 재검사하여 0초 딜레이로 화면 즉시 갱신
+    let anyTextAvailable = false;
+    const reevaluatedStudents = (studentsRef.current || []).map(st => {
+      if (st.fullText) {
+        anyTextAvailable = true;
+        const matched = matchKeywordsInText(st.fullText, updated);
+        return {
+          ...st,
+          keywordsUsed: matched,
+          keywordCount: matched.length
+        };
+      }
+      return st;
+    });
+
+    if (anyTextAvailable) {
+      setStudents(reevaluatedStudents);
+      studentsRef.current = reevaluatedStudents;
+      saveStudentsStatus(spreadsheetId, reevaluatedStudents).catch(console.error);
+    }
+
+    if (pollStudentSlidesRef.current) {
+      pollStudentSlidesRef.current(updated);
+    }
   };
 
   // Live Polling Control
@@ -241,7 +333,9 @@ export default function Dashboard() {
         latest.charCount !== activeStudent.charCount || 
         latest.status !== activeStudent.status || 
         latest.slideCount !== activeStudent.slideCount ||
-        latest.imageCount !== activeStudent.imageCount
+        latest.imageCount !== activeStudent.imageCount ||
+        latest.keywordCount !== activeStudent.keywordCount ||
+        (latest.keywordsUsed || []).join(',') !== (activeStudent.keywordsUsed || []).join(',')
       )) {
         setActiveStudent(prev => ({ ...prev, ...latest }));
       }
@@ -314,7 +408,15 @@ export default function Dashboard() {
 
       const cachedKeywords = localStorage.getItem(`keywords_${spreadsheetId}`);
       if (cachedKeywords) {
-        setKeywords(JSON.parse(cachedKeywords));
+        try {
+          const parsed = JSON.parse(cachedKeywords);
+          if (Array.isArray(parsed)) {
+            setKeywords(parsed);
+            keywordsRef.current = parsed;
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached keywords:', e);
+        }
       }
     }
 
@@ -388,7 +490,7 @@ export default function Dashboard() {
 
             try {
               // 1) Fetch current slide stats
-              const stats = await fetchSlideStats(student.slideId, keywords);
+              const stats = await fetchSlideStats(student.slideId, keywordsRef.current.length > 0 ? keywordsRef.current : keywords);
 
               // 2) Fetch revision history from Google Drive
               let revisions = [];
@@ -437,11 +539,16 @@ export default function Dashboard() {
                 }
               }
 
+              const prevKwStr = (student.keywordsUsed || []).slice().sort().join(',');
+              const newKwStr = (stats.keywordsUsed || []).slice().sort().join(',');
+              const isKeywordsChanged = prevKwStr !== newKwStr;
+
               if (
                 student.status !== nextStatus ||
                 student.charCount !== stats.charCount ||
                 student.slideCount !== stats.slideCount ||
-                student.imageCount !== stats.imageCount
+                student.imageCount !== stats.imageCount ||
+                isKeywordsChanged
               ) {
                 studentsDataUpdated = true;
               }
@@ -618,8 +725,9 @@ export default function Dashboard() {
   };
 
   // Poll Slide API
-  const pollStudentSlides = async () => {
-    console.log('Polling student slides...');
+  const pollStudentSlides = async (customKeywords = null) => {
+    const activeKeywords = customKeywords || (keywordsRef.current.length > 0 ? keywordsRef.current : keywords);
+    console.log('Polling student slides with keywords:', activeKeywords);
     const now = new Date();
     const updatedStudents = [...studentsRef.current];
     const newLogs = [];
@@ -627,132 +735,143 @@ export default function Dashboard() {
 
     setPollingTick(prev => prev + 1);
 
-    await Promise.all(
-      updatedStudents.map(async (student) => {
-        if (!student.slideId) return;
+    const CONCURRENCY = 4;
+    for (let i = 0; i < updatedStudents.length; i += CONCURRENCY) {
+      const chunk = updatedStudents.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (student) => {
+          if (!student.slideId) return;
 
-        try {
-          const stats = await fetchSlideStats(student.slideId, keywords);
-          
-          const prevCharCount = student.charCount || 0;
-          const prevSlideCount = student.slideCount || 0;
-          const prevImageCount = student.imageCount || 0;
-          const prevRevisionId = student.revisionId || '';
-          const prevText = student.fullText || '';
-          const prevStatus = student.status;
+          try {
+            const stats = await fetchSlideStats(student.slideId, activeKeywords);
+            
+            const prevCharCount = student.charCount || 0;
+            const prevSlideCount = student.slideCount || 0;
+            const prevImageCount = student.imageCount || 0;
+            const prevRevisionId = student.revisionId || '';
+            const prevText = student.fullText || '';
+            const prevStatus = student.status;
 
-          const charDiff = stats.charCount - prevCharCount;
-          const slideDiff = stats.slideCount - prevSlideCount;
-          const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
-          const isContentChanged = isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount;
+            const charDiff = stats.charCount - prevCharCount;
+            const slideDiff = stats.slideCount - prevSlideCount;
+            const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
+            const isContentChanged = isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount;
 
-          let nextStatus = prevStatus;
-          let nextLastActive = student.lastActiveAt || now.toISOString();
+            let nextStatus = prevStatus;
+            let nextLastActive = student.lastActiveAt || now.toISOString();
 
-          // 1) Actual interaction/content edit detected
-          if (isContentChanged) {
-            nextStatus = 'active';
-            nextLastActive = now.toISOString();
-            stateChanged = true;
+            // 1) Actual interaction/content edit detected
+            if (isContentChanged) {
+              nextStatus = 'active';
+              nextLastActive = now.toISOString();
+              stateChanged = true;
 
-            let diffTextSegment = '';
-            // Real-time polling is ~25s. Typing 180+ Korean characters in 25s (~500+ CPM) indicates likely copy-paste.
-            const isPasteSuspicious = charDiff >= 180;
-            if (isPasteSuspicious) {
-              nextStatus = 'suspicious';
-              diffTextSegment = extractDiffText(prevText, stats.fullText);
-            }
-
-            const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
-
-            let logSnippet = '';
-            if (isPasteSuspicious && diffTextSegment) {
-              logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
-            } else if (addedTextSnippet) {
-              logSnippet = `[작성] "${addedTextSnippet}"`;
-            } else if (slideDiff > 0) {
-              logSnippet = `[슬라이드] 새 슬라이드 추가 (+${slideDiff}장)`;
-            } else if (stats.imageCount > prevImageCount) {
-              logSnippet = `[시각화] 이미지 자료 추가 (+${stats.imageCount - prevImageCount}개)`;
-            } else if (charDiff < 0) {
-              logSnippet = `[수정] 본문 텍스트 퇴고 및 정리 (${charDiff}자)`;
-            } else {
-              logSnippet = `[편집] 슬라이드 서식 및 개체 편집`;
-            }
-
-            // Record log only when previous baseline exists and there is an actual delta
-            if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount)) {
-              newLogs.push({
-                name: student.name,
-                timestamp: now.toISOString(),
-                charCount: stats.charCount,
-                charDiff: charDiff,
-                slideCount: stats.slideCount,
-                imageCount: stats.imageCount,
-                keywordCount: stats.keywordsUsed.length,
-                copiedText: logSnippet
-              });
-            }
-          } else {
-            // 2) Content unchanged during this tick
-            if (prevStatus === 'disconnected') {
-              // Never interacted / no edit revisions -> stay disconnected
-              nextStatus = 'disconnected';
-            } else {
-              // Interacted in the past -> active or idle based on idle time
-              const lastActiveTime = new Date(nextLastActive);
-              const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
-
-              if (minutesIdle >= 5) {
-                if (prevStatus !== 'idle') {
-                  nextStatus = 'idle';
-                  stateChanged = true;
-                }
-              } else if (prevStatus === 'suspicious') {
+              let diffTextSegment = '';
+              // Real-time polling is ~25s. Typing 180+ Korean characters in 25s (~500+ CPM) indicates likely copy-paste.
+              const isPasteSuspicious = charDiff >= 180;
+              if (isPasteSuspicious) {
                 nextStatus = 'suspicious';
+                diffTextSegment = extractDiffText(prevText, stats.fullText);
+              }
+
+              const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
+
+              let logSnippet = '';
+              if (isPasteSuspicious && diffTextSegment) {
+                logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
+              } else if (addedTextSnippet) {
+                logSnippet = `[작성] "${addedTextSnippet}"`;
+              } else if (slideDiff > 0) {
+                logSnippet = `[슬라이드] 새 슬라이드 추가 (+${slideDiff}장)`;
+              } else if (stats.imageCount > prevImageCount) {
+                logSnippet = `[시각화] 이미지 자료 추가 (+${stats.imageCount - prevImageCount}개)`;
+              } else if (charDiff < 0) {
+                logSnippet = `[수정] 본문 텍스트 퇴고 및 정리 (${charDiff}자)`;
               } else {
-                nextStatus = 'active';
+                logSnippet = `[편집] 슬라이드 서식 및 개체 편집`;
+              }
+
+              // Record log only when previous baseline exists and there is an actual delta
+              if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount)) {
+                newLogs.push({
+                  name: student.name,
+                  timestamp: now.toISOString(),
+                  charCount: stats.charCount,
+                  charDiff: charDiff,
+                  slideCount: stats.slideCount,
+                  imageCount: stats.imageCount,
+                  keywordCount: stats.keywordsUsed.length,
+                  copiedText: logSnippet
+                });
+              }
+            } else {
+              // 2) Content unchanged during this tick
+              if (prevStatus === 'disconnected') {
+                // Never interacted / no edit revisions -> stay disconnected
+                nextStatus = 'disconnected';
+              } else {
+                // Interacted in the past -> active or idle based on idle time
+                const lastActiveTime = new Date(nextLastActive);
+                const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
+
+                if (minutesIdle >= 5) {
+                  if (prevStatus !== 'idle') {
+                    nextStatus = 'idle';
+                    stateChanged = true;
+                  }
+                } else if (prevStatus === 'suspicious') {
+                  nextStatus = 'suspicious';
+                } else {
+                  nextStatus = 'active';
+                }
               }
             }
+
+            const prevKwStr = (student.keywordsUsed || []).slice().sort().join(',');
+            const newKwStr = (stats.keywordsUsed || []).slice().sort().join(',');
+            const isKeywordsChanged = prevKwStr !== newKwStr;
+
+            if (
+              nextStatus !== prevStatus || 
+              stats.charCount !== prevCharCount || 
+              stats.slideCount !== prevSlideCount || 
+              stats.imageCount !== prevImageCount ||
+              isKeywordsChanged
+            ) {
+              stateChanged = true;
+            }
+
+            let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
+            const accumulatedFocus = student.focusRatio || 100;
+            const currentTick = pollingTick + 1;
+            const nextFocusRatio = Math.round(((accumulatedFocus * (currentTick - 1)) + currentTickFocus) / currentTick);
+
+            student.charCount = stats.charCount;
+            student.slideCount = stats.slideCount;
+            student.imageCount = stats.imageCount;
+            student.blankSlideCount = stats.blankSlideCount;
+            student.keywordsUsed = stats.keywordsUsed;
+            student.keywordCount = stats.keywordsUsed.length;
+            student.status = nextStatus;
+            student.lastActiveAt = nextLastActive;
+            student.focusRatio = nextFocusRatio;
+            
+            // Cache in memory for delta comparison on next tick
+            student.revisionId = stats.revisionId;
+            student.fullText = stats.fullText;
+
+          } catch (err) {
+            console.error(`Error polling slide for ${student.name}:`, err);
+            if (student.status !== 'disconnected' && !student.charCount) {
+              student.status = 'disconnected';
+              stateChanged = true;
+            }
           }
-
-          if (
-            nextStatus !== prevStatus || 
-            stats.charCount !== prevCharCount || 
-            stats.slideCount !== prevSlideCount || 
-            stats.imageCount !== prevImageCount
-          ) {
-            stateChanged = true;
-          }
-
-          let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
-          const accumulatedFocus = student.focusRatio || 100;
-          const currentTick = pollingTick + 1;
-          const nextFocusRatio = Math.round(((accumulatedFocus * (currentTick - 1)) + currentTickFocus) / currentTick);
-
-          student.charCount = stats.charCount;
-          student.slideCount = stats.slideCount;
-          student.imageCount = stats.imageCount;
-          student.blankSlideCount = stats.blankSlideCount;
-          student.keywordsUsed = stats.keywordsUsed;
-          student.keywordCount = stats.keywordsUsed.length;
-          student.status = nextStatus;
-          student.lastActiveAt = nextLastActive;
-          student.focusRatio = nextFocusRatio;
-          
-          // Cache in memory for delta comparison on next tick
-          student.revisionId = stats.revisionId;
-          student.fullText = stats.fullText;
-
-        } catch (err) {
-          console.error(`Error polling slide for ${student.name}:`, err);
-          if (student.status !== 'disconnected' && !student.charCount) {
-            student.status = 'disconnected';
-            stateChanged = true;
-          }
-        }
-      })
-    );
+        })
+      );
+      // 배치가 완료될 때마다 화면에 즉각 실시간 반영
+      setStudents([...updatedStudents]);
+    }
 
     if (stateChanged || newLogs.length > 0) {
       setStudents(updatedStudents);
@@ -771,6 +890,10 @@ export default function Dashboard() {
       setLastPollTime(now);
     }
   };
+
+  useEffect(() => {
+    pollStudentSlidesRef.current = pollStudentSlides;
+  });
 
   // Manual Trigger Poll (Silent background refresh without hiding student cards)
   const handleManualRefresh = async () => {
@@ -1148,7 +1271,7 @@ export default function Dashboard() {
     const coreScore = isDisconnected ? 0 : (keywordList.length > 0 ? Math.round((student.keywordCount / keywordList.length) * 100) : 0);
 
     const gauges = [
-      { label: '⏳ 과제 몰입 지속성', score: focusScore, color: '#16a34a' },
+      { label: '🎯 과제 몰입 지속성', score: focusScore, color: '#16a34a' },
       { label: '🔑 핵심 키워드 성취도', score: coreScore, color: '#f59e0b' }
     ];
 
@@ -1244,9 +1367,21 @@ export default function Dashboard() {
 
   if (sdkStatus === 'loading') {
     return (
-      <div style={{ textAlign: 'center', padding: '5rem 0' }}>
-        <div style={{ fontSize: '3rem', animation: 'spin 2s linear infinite' }}>⏳</div>
-        <h2 style={{ marginTop: '1.5rem', fontWeight: 800 }}>대시보드 불러오는 중...</h2>
+      <div style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem 1rem', textAlign: 'center' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1.25rem' }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="2" x2="12" y2="6" />
+            <line x1="12" y1="18" x2="12" y2="22" />
+            <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+            <line x1="2" y1="12" x2="6" y2="12" />
+            <line x1="18" y1="12" x2="22" y2="12" />
+            <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+            <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+          </svg>
+        </div>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>대시보드 불러오는 중...</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '0.45rem' }}>구글 스프레드시트에서 실시간 학습 데이터를 연동하고 있습니다.</p>
       </div>
     );
   }
@@ -1311,17 +1446,17 @@ export default function Dashboard() {
           >
             ◀ 돌아가기
           </button>
-          <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginLeft: '0.5rem' }}>
-            <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-            <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-            <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-            <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-            <rect x="18" y="24" width="8" height="2" fill="white"/>
-            <rect x="18" y="28" width="12" height="2" fill="white"/>
-          </svg>
-          <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-            {classTitle}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.4rem' }}>
+            <svg width="20" height="20" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+              {classTitle}
+            </span>
+          </div>
           {isMonitoringClosed ? (
             <span style={{ 
               fontSize: '0.75rem', 
@@ -1357,7 +1492,16 @@ export default function Dashboard() {
             }}>
               {isBackgroundSyncing ? (
                 <>
-                  <span style={{ display: 'inline-block', animation: 'spin 1.5s linear infinite' }}>⏳</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                    <line x1="12" y1="2" x2="12" y2="6" />
+                    <line x1="12" y1="18" x2="12" y2="22" />
+                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                    <line x1="2" y1="12" x2="6" y2="12" />
+                    <line x1="18" y1="12" x2="22" y2="12" />
+                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+                  </svg>
                   <span>데이터 동기화 중...</span>
                 </>
               ) : (
@@ -1830,11 +1974,11 @@ export default function Dashboard() {
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}>
                   <span className="status-dot active" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#22c55e' }}></span>
-                  <strong>활동 완료</strong>
+                  <strong>활동중</strong>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}>
                   <span className="status-dot idle" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#eab308' }}></span>
-                  <strong>정체 기록</strong>
+                  <strong>정체중</strong>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}>
                   <span className="status-dot suspicious" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
@@ -1893,8 +2037,20 @@ export default function Dashboard() {
 
             {/* Students 바둑판 그리드 */}
             {isLoading && students.length === 0 ? (
-              <div className="card" style={{ padding: '4rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                데이터 동기화 및 갱신 중...
+              <div style={{ padding: '5rem 0', textAlign: 'center', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '0.85rem' }}>
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="2" x2="12" y2="6" />
+                    <line x1="12" y1="18" x2="12" y2="22" />
+                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                    <line x1="2" y1="12" x2="6" y2="12" />
+                    <line x1="18" y1="12" x2="22" y2="12" />
+                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+                  </svg>
+                </div>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)', fontSize: '1rem' }}>데이터 동기화 및 갱신 중...</span>
               </div>
             ) : filteredStudents.length === 0 ? (
               <div className="card" style={{ padding: '4rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -1922,44 +2078,43 @@ export default function Dashboard() {
                       <span>이미지 {student.imageCount}개</span>
                     </div>
 
+                    {/* 실시간 핵심 키워드 달성 현황 (깔끔하고 컴팩트한 일체형 스탯) */}
+                    {keywords.length > 0 && (
+                      <div 
+                        style={{ 
+                          fontSize: '0.78rem', 
+                          color: 'var(--text-muted)', 
+                          marginTop: '0.35rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          fontWeight: 600
+                        }}
+                        title={student.keywordsUsed?.length ? `달성 키워드: ${student.keywordsUsed.join(', ')}` : '키워드 미달성'}
+                      >
+                        <span>키워드</span>
+                        <strong style={{ color: (student.keywordCount || 0) > 0 ? 'var(--brand-green-dark)' : 'var(--text-muted)' }}>
+                          {student.keywordCount || 0}/{keywords.length}개
+                        </strong>
+                      </div>
+                    )}
+
                     <div className="status-indicator-icon">
                       <span className={`status-dot ${student.status}`} />
                     </div>
 
                     {student.focusRatio < 60 && student.status !== 'disconnected' && (
-                      <span style={{ fontSize: '0.75rem', color: '#b45309', fontWeight: 700, backgroundColor: '#fef3c7', padding: '0.1rem 0.35rem', borderRadius: '4px', marginTop: '0.4rem' }}>
-                        집중도: {student.focusRatio}%
+                      <span style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 700, backgroundColor: '#fef3c7', padding: '0.1rem 0.35rem', borderRadius: '4px', marginTop: '0.3rem' }}>
+                        집중도 {student.focusRatio}%
                       </span>
                     )}
-
-                    {/* AI 실시간 학습 행동 진단 요약 배지 */}
-                    {(() => {
-                      const diag = diagnoseStudentBehavior(student, logs.filter(l => l.name === student.name), keywords);
-                      return (
-                        <div style={{ 
-                          fontSize: '0.7rem', 
-                          fontWeight: 800, 
-                          color: diag.color, 
-                          backgroundColor: diag.bgColor, 
-                          border: `1px solid ${diag.borderColor}`, 
-                          padding: '0.2rem 0.45rem', 
-                          borderRadius: '4px',
-                          marginTop: '0.45rem',
-                          textAlign: 'center',
-                          width: '100%',
-                          boxSizing: 'border-box',
-                          textOverflow: 'ellipsis',
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap'
-                        }} title={diag.badge}>
-                          {diag.badge}
-                        </div>
-                      );
-                    })()}
                   </div>
                 ))}
               </div>
             )}
+
+            {/* Subtle Signature Stamp */}
+            <MadeByStamp style={{ marginTop: '1.5rem', paddingBottom: '0.5rem' }} />
           </div>
         </main>
       ) : (
@@ -2036,6 +2191,9 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+
+          {/* Subtle Signature Stamp */}
+          <MadeByStamp style={{ marginTop: '1.5rem', paddingBottom: '0.5rem' }} />
         </main>
       )}
 
@@ -2268,25 +2426,36 @@ export default function Dashboard() {
                 {keywords.length > 0 && (
                   <div>
                     <h4 style={{ fontWeight: 800, fontSize: '0.9rem', color: '#475569', margin: '0 0 0.5rem 0' }}>
-                      핵심 키워드 도달 현황 ({activeStudent.keywordCount}개 / {keywords.length}개 완료)
+                      핵심 키워드 도달 현황 ({activeStudent.keywordCount || 0}개 / {keywords.length}개 완료)
                     </h4>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                       {keywords.map(kw => {
-                        const isUsed = activeStudent.keywordsUsed.includes(kw);
+                        const kwTrim = (kw || '').trim();
+                        const isUsed = Boolean(
+                          activeStudent.keywordsUsed &&
+                          (activeStudent.keywordsUsed.includes(kwTrim) ||
+                           activeStudent.keywordsUsed.some(u => 
+                             (u || '').trim().toLowerCase() === kwTrim.toLowerCase() ||
+                             (u || '').replace(/\s/g, '').toLowerCase() === kwTrim.replace(/\s/g, '').toLowerCase()
+                           ))
+                        );
                         return (
                           <span 
                             key={kw} 
                             style={{
-                              fontSize: '0.72rem',
+                              fontSize: '0.74rem',
                               fontWeight: 800,
-                              padding: '0.2rem 0.5rem',
+                              padding: '0.22rem 0.55rem',
                               borderRadius: '4px',
-                              border: `1px solid ${isUsed ? 'var(--border-light-green)' : '#cbd5e1'}`,
-                              backgroundColor: isUsed ? 'var(--bg-light-green)' : '#f1f5f9',
-                              color: isUsed ? 'var(--text-light-green)' : '#94a3b8'
+                              border: `1.5px solid ${isUsed ? '#86efac' : '#cbd5e1'}`,
+                              backgroundColor: isUsed ? '#dcfce7' : '#f1f5f9',
+                              color: isUsed ? '#15803d' : '#94a3b8',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem'
                             }}
                           >
-                            {kw}
+                            {isUsed ? '✓ ' : '• '}{kw}
                           </span>
                         );
                       })}
@@ -2379,7 +2548,7 @@ export default function Dashboard() {
                 <div style={{ marginTop: '0.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <h4 style={{ fontWeight: 800, fontSize: '0.9rem', color: '#475569', margin: 0 }}>
-                      ⏳ 실시간 상세 활동 기록 (최신순)
+                      🕒 실시간 상세 활동 기록 (최신순)
                     </h4>
                     <button 
                       onClick={() => setShowTimelineModal(true)}
@@ -2597,7 +2766,7 @@ export default function Dashboard() {
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--brand-green-dark)', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
-                ⏳ [{activeStudent.name}] 학생 전체 탐구 활동 기록 타임라인
+                🕒 [{activeStudent.name}] 학생 전체 탐구 활동 기록 타임라인
               </h2>
               <button onClick={() => setShowTimelineModal(false)} style={{ border: 'none', background: 'none', fontSize: '1.5rem', fontWeight: 700, cursor: 'pointer', color: '#94a3b8' }}>&times;</button>
             </div>

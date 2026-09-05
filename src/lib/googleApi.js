@@ -396,71 +396,106 @@ export async function fetchSlideStats(slideId, keywords = []) {
   let allText = '';
   const foundKeywords = new Set();
 
-  slides.forEach(slide => {
-    let slideHasContent = false;
-    const pageElements = slide.pageElements || [];
+  // 재귀적으로 모든 요소(도형, 표, 그룹 개체, 워드아트 등)에서 텍스트 및 이미지 수집
+  const processElement = (element) => {
+    if (!element) return;
 
-    pageElements.forEach(element => {
-      // 1) 텍스트 추출 (텍스트 상자 또는 도형 텍스트)
-      if (element.shape && element.shape.text) {
-        const textElements = element.shape.text.textElements || [];
-        textElements.forEach(te => {
-          if (te.textRun && te.textRun.content) {
-            const content = te.textRun.content;
-            allText += content + '\n';
-            // 공백과 개행 제외한 글자 수 카운팅
-            const cleanText = content.replace(/\s/g, '');
-            if (cleanText.length > 0) {
-              totalCharCount += cleanText.length;
-              slideHasContent = true;
+    // 1) 텍스트 상자 및 도형 텍스트
+    if (element.shape && element.shape.text && element.shape.text.textElements) {
+      element.shape.text.textElements.forEach(te => {
+        if (te.textRun && te.textRun.content) {
+          const content = te.textRun.content;
+          allText += content + ' ';
+          const clean = content.replace(/\s/g, '');
+          if (clean.length > 0) {
+            totalCharCount += clean.length;
+          }
+        }
+      });
+    }
 
-              // 키워드 매칭
-              keywords.forEach(keyword => {
-                if (content.toLowerCase().includes(keyword.toLowerCase())) {
-                  foundKeywords.add(keyword);
+    // 2) 표 텍스트
+    if (element.table && element.table.tableRows) {
+      element.table.tableRows.forEach(row => {
+        (row.tableCells || []).forEach(cell => {
+          if (cell.text && cell.text.textElements) {
+            cell.text.textElements.forEach(te => {
+              if (te.textRun && te.textRun.content) {
+                const content = te.textRun.content;
+                allText += content + ' ';
+                const clean = content.replace(/\s/g, '');
+                if (clean.length > 0) {
+                  totalCharCount += clean.length;
                 }
-              });
-            }
+              }
+            });
           }
         });
-      }
+      });
+    }
 
-      // 2) 테이블 텍스트 추출
-      if (element.table) {
-        slideHasContent = true;
-        const tableRows = element.table.tableRows || [];
-        tableRows.forEach(row => {
-          const cells = row.tableCells || [];
-          cells.forEach(cell => {
-            if (cell.text) {
-              const textElements = cell.text.textElements || [];
-              textElements.forEach(te => {
-                if (te.textRun && te.textRun.content) {
-                  const content = te.textRun.content;
-                  allText += content + '\n';
-                  const cleanText = content.replace(/\s/g, '');
-                  totalCharCount += cleanText.length;
-                  keywords.forEach(keyword => {
-                    if (content.toLowerCase().includes(keyword.toLowerCase())) {
-                      foundKeywords.add(keyword);
-                    }
-                  });
-                }
-              });
-            }
-          });
-        });
-      }
+    // 3) 그룹화된 개체 (Group) 재귀 탐색 - 그룹 내 텍스트박스 누락 방지
+    if (element.elementGroup && element.elementGroup.children) {
+      element.elementGroup.children.forEach(child => {
+        processElement(child);
+      });
+    }
 
-      // 3) 이미지 카운트
-      if (element.image) {
-        imageCount++;
-        slideHasContent = true;
+    // 4) 워드아트 (WordArt) 텍스트
+    if (element.wordArt && element.wordArt.renderedText) {
+      const content = element.wordArt.renderedText;
+      allText += content + ' ';
+      const clean = content.replace(/\s/g, '');
+      if (clean.length > 0) {
+        totalCharCount += clean.length;
       }
+    }
+
+    // 5) 이미지 카운트
+    if (element.image) {
+      imageCount++;
+    }
+  };
+
+  slides.forEach(slide => {
+    const prevCharCount = totalCharCount;
+    const prevImageCount = imageCount;
+
+    // 슬라이드 본문 개체 탐색
+    const pageElements = slide.pageElements || [];
+    pageElements.forEach(element => {
+      processElement(element);
     });
 
-    if (!slideHasContent) {
+    // 발표자 노트 영역 텍스트도 함께 탐색 (학생이 노트에 정리한 경우)
+    if (slide.slideProperties?.notesPage?.pageElements) {
+      slide.slideProperties.notesPage.pageElements.forEach(element => {
+        processElement(element);
+      });
+    }
+
+    if (totalCharCount === prevCharCount && imageCount === prevImageCount) {
       blankSlideCount++;
+    }
+  });
+
+  // 전체 프레젠테이션 텍스트 기반 키워드 정밀 검출 (서식 분할 textRun 및 띄어쓰기 차이 완벽 지원)
+  const normalizedAllText = allText.toLowerCase();
+  const compactAllText = normalizedAllText.replace(/\s+/g, '');
+
+  keywords.forEach(keyword => {
+    const trimmed = (keyword || '').trim();
+    if (!trimmed) return;
+    const lowerKw = trimmed.toLowerCase();
+    const compactKw = lowerKw.replace(/\s+/g, '');
+
+    // 1) 대소문자 무시 직접 포함 검출
+    // 2) 공백 제거 검출 ('탄소 중립' vs '탄소중립', '기후 변화' vs '기후변화')
+    if (
+      normalizedAllText.includes(lowerKw) ||
+      (compactKw.length >= 1 && compactAllText.includes(compactKw))
+    ) {
+      foundKeywords.add(trimmed);
     }
   });
 

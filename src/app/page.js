@@ -12,6 +12,7 @@ import {
   getGoogleConfig,
   saveGoogleConfig
 } from '@/lib/googleApi';
+import MadeByStamp from '@/components/MadeByStamp';
 
 export default function Home() {
   const router = useRouter();
@@ -106,16 +107,24 @@ export default function Home() {
     setRosterList([]);
   };
 
-  // Helper to parse student lists (supports linebreaks, numbers, spacing)
+  // Helper to parse student lists (supports linebreaks, numbers, spacing, or number-only inputs for privacy)
   const parseStudents = (text) => {
     return text.split('\n')
       .map(line => line.trim())
       .filter(Boolean)
       .map((line, idx) => {
-        const match = line.match(/^(\d+)[\s.번]*\s+(.+)$/);
-        if (match) {
-          return { number: parseInt(match[1]), name: match[2].trim() };
+        // Case A: "1 홍길동" or "1. 홍길동" or "1번 홍길동"
+        const matchWithText = line.match(/^(\d+)[\s.번]*\s+(.+)$/);
+        if (matchWithText) {
+          return { number: parseInt(matchWithText[1]), name: matchWithText[2].trim() };
         }
+        // Case B: Number only like "1" or "1번"
+        const matchNumOnly = line.match(/^(\d+)[\s.번]*$/);
+        if (matchNumOnly) {
+          const num = parseInt(matchNumOnly[1]);
+          return { number: num, name: `${num}번 학생` };
+        }
+        // Case C: Name only without number
         return { number: idx + 1, name: line };
       });
   };
@@ -221,130 +230,218 @@ export default function Home() {
     }
   };
 
-  // Render Login view with Dual-Pane Split screen layout (Copypasta & design optimized)
+  // Render Clean Minimal Centered Login Page (Single Viewport Layout)
   if (sdkStatus === 'ready' && !isAuthenticated) {
     return (
-      <div className="login-page-container">
-        {/* Left Side: Brand Panel */}
-        <div className="login-brand-side">
-          <div className="login-brand-subtitle">GOOGLE WORKSPACE INTEGRATION</div>
-          <h1 className="login-brand-title">
-            과정은 데이터로,<br />
-            피드백은 실시간으로.
-          </h1>
-          <div className="login-brand-features">
-            <div className="login-brand-feature-item">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <div className="login-brand-feature-desc">
-                <strong>수업 준비 자동화</strong><br />
-                사본 생성부터 학생 배정까지 단 1초 만에 완료. 학생은 번거로운 로그인 없이 코드 접속만으로 바로 작업을 시작합니다.
-              </div>
-            </div>
-            <div className="login-brand-feature-item">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <div className="login-brand-feature-desc">
-                <strong>실시간 활동 대시보드</strong><br />
-                화면 뒤편의 탐구 과정을 실시간 시각화합니다. 5분 이상 멈춘 학생을 즉시 파악해 적시에 피드백을 제공하세요.
-              </div>
-            </div>
-            <div className="login-brand-feature-item">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <div className="login-brand-feature-desc">
-                <strong>과정 중심 평가 리포트</strong><br />
-                글자 수 추이와 핵심 키워드를 기반으로 성장 과정을 평가합니다. 분석 보고서는 A4 인쇄와 구글 시트 소장이 가능합니다.
-              </div>
-            </div>
-          </div>
-        </div>
+      <div style={{ 
+        minHeight: '100vh', 
+        width: '100%', 
+        backgroundColor: '#f8fafc', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        padding: '2rem 1.5rem',
+        position: 'relative'
+      }}>
+        {/* Subtle Brand Background Accent */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '280px',
+          background: 'linear-gradient(180deg, #ecfdf5 0%, rgba(248, 250, 252, 0) 100%)',
+          pointerEvents: 'none'
+        }} />
 
-        {/* Right Side: Clean Minimal Login Form (Centered inside viewport side) */}
-        <div className="login-form-side">
-          <div style={{ maxWidth: '360px', width: '100%', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            
-            {/* Logo and Big Title */}
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.65rem', marginBottom: '0.5rem' }}>
-                <img 
-                  src="/google-slides.svg" 
-                  alt="Google Slides Logo" 
-                  style={{ width: '34px', height: '34px', objectFit: 'contain' }}
-                />
-                <h1 style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.03em', lineHeight: '1' }}>
-                  G배움 로그
-                </h1>
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
-                구글 워크스페이스(슬라이드·문서) 기반 실시간 과정중심 평가 도구
-              </p>
-            </div>
-
-            {/* Google Sign-in */}
-            <button className="btn-google-login" onClick={handleLogin} style={{ marginBottom: '1.75rem' }}>
-              <svg width="18" height="18" viewBox="0 0 18 18">
-                <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7l2.76 2.13c1.62-1.49 2.53-3.69 2.53-6.46z"/>
-                <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.76-2.13c-.76.51-1.74.82-3.2.82-2.46 0-4.54-1.66-5.28-3.9L.96 12.75C2.43 15.89 5.5 18 9 18z"/>
-                <path fill="#FBBC05" d="M3.72 10.6c-.19-.58-.3-1.2-.3-1.8s.11-1.22.3-1.8L.96 4.9C.32 6.18 0 7.6 0 9s.32 2.82.96 4.1l2.76-2.5z"/>
-                <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.96 5.25L3.72 7.75C4.46 5.52 6.54 3.58 9 3.58z"/>
-              </svg>
-              Google 계정으로 로그인
-            </button>
-
-            {/* Google Workspace Integration Display */}
-            <div style={{ 
-              backgroundColor: '#f8fafc', 
-              border: '1px solid var(--border-card)', 
-              borderRadius: '12px', 
-              padding: '1.25rem 1rem', 
-              textAlign: 'center' 
+        {/* Main Centered Login Card */}
+        <div style={{ 
+          position: 'relative',
+          zIndex: 1,
+          maxWidth: '460px', 
+          width: '100%', 
+          backgroundColor: '#ffffff',
+          borderRadius: '24px',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.07), 0 0 0 1px rgba(0, 0, 0, 0.02)',
+          padding: '3rem 2.5rem',
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center',
+          gap: '2rem'
+        }}>
+          
+          {/* Logo and Title (Google 4-Color G + 배움 로그) */}
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <h1 style={{ 
+              fontSize: '2.6rem', 
+              fontWeight: 900, 
+              color: '#0f172a', 
+              letterSpacing: '-0.03em', 
+              lineHeight: '1.2',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.45rem',
+              marginBottom: '0.6rem'
             }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
-                연동되는 GOOGLE WORKSPACE 서비스
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', marginBottom: '0.5rem' }}>
-                {/* Google Drive Official Icon */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
-                  <img 
-                    src="/google-drive.svg" 
-                    alt="Google Drive" 
-                    style={{ width: '28px', height: '28px', objectFit: 'contain' }}
-                  />
-                  <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#5f6368' }}>Drive</span>
-                </div>
-                {/* Google Sheets Official Icon */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
-                  <img 
-                    src="/google-sheets.svg" 
-                    alt="Google Sheets" 
-                    style={{ width: '28px', height: '28px', objectFit: 'contain' }}
-                  />
-                  <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#5f6368' }}>Sheets</span>
-                </div>
-                {/* Google Slides Official Icon */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }}>
-                  <img 
-                    src="/google-slides.svg" 
-                    alt="Google Slides" 
-                    style={{ width: '28px', height: '28px', objectFit: 'contain' }}
-                  />
-                  <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#5f6368' }}>Slides</span>
-                </div>
-              </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                구글 공식 API 권한을 통해 안전하게 암호화 연동됩니다.
-              </div>
+              {/* Google 4-Color G */}
+              <svg width="40" height="40" viewBox="0 0 48 48" style={{ display: 'block', flexShrink: 0 }}>
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>배움 로그</span>
+                {/* Sleek Footprint Motif */}
+                <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0, opacity: 0.85, transform: 'rotate(5deg)' }}>
+                  <ellipse cx="16" cy="30" rx="6.5" ry="9.5" transform="rotate(-15 16 30)" fill="#0f172a"/>
+                  <circle cx="10" cy="16.5" r="2" fill="#0f172a"/>
+                  <circle cx="14" cy="14.5" r="2.2" fill="#0f172a"/>
+                  <circle cx="18.5" cy="15" r="2" fill="#0f172a"/>
+                  <circle cx="22.5" cy="17" r="1.8" fill="#0f172a"/>
+                  <ellipse cx="32" cy="20" rx="6.5" ry="9.5" transform="rotate(15 32 20)" fill="#334155"/>
+                  <circle cx="26" cy="6.5" r="2" fill="#334155"/>
+                  <circle cx="30.5" cy="4.5" r="2.2" fill="#334155"/>
+                  <circle cx="35" cy="5" r="2" fill="#334155"/>
+                  <circle cx="39" cy="7" r="1.8" fill="#334155"/>
+                </svg>
+              </span>
+            </h1>
+            <p style={{ color: '#64748b', fontSize: '0.95rem', fontWeight: 600, letterSpacing: '-0.01em' }}>
+              구글 워크스페이스 실시간 과정평가 대시보드
+            </p>
+          </div>
+
+          {/* Google Sign-in Button */}
+          <button 
+            className="btn-google-login" 
+            onClick={handleLogin} 
+            style={{ 
+              width: '100%',
+              padding: '0.95rem 1.5rem',
+              fontSize: '1rem',
+              fontWeight: 800,
+              borderRadius: '12px',
+              backgroundColor: '#ffffff',
+              border: '1.5px solid #cbd5e1',
+              color: '#1e293b',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 18 18">
+              <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.25-.16-1.84H9v3.47h4.84c-.21 1.12-.84 2.07-1.79 2.7l2.76 2.13c1.62-1.49 2.53-3.69 2.53-6.46z"/>
+              <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.76-2.13c-.76.51-1.74.82-3.2.82-2.46 0-4.54-1.66-5.28-3.9L.96 12.75C2.43 15.89 5.5 18 9 18z"/>
+              <path fill="#FBBC05" d="M3.72 10.6c-.19-.58-.3-1.2-.3-1.8s.11-1.22.3-1.8L.96 4.9C.32 6.18 0 7.6 0 9s.32 2.82.96 4.1l2.76-2.5z"/>
+              <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.47.89 11.43 0 9 0 5.5 0 2.43 2.11.96 5.25L3.72 7.75C4.46 5.52 6.54 3.58 9 3.58z"/>
+            </svg>
+            Google 계정으로 로그인
+          </button>
+
+          {/* Google Workspace Integration Display */}
+          <div style={{ 
+            width: '100%',
+            backgroundColor: '#f8fafc', 
+            border: '1px solid #e2e8f0', 
+            borderRadius: '14px', 
+            padding: '1.25rem 0.85rem', 
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#64748b', marginBottom: '0.95rem', letterSpacing: '0.05em' }}>
+              안전하게 연동되는 GOOGLE WORKSPACE
             </div>
             
+            {/* 5 Workspace Apps Grid (Active 3 + Upcoming 2) */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: '1.25rem', marginBottom: '0.85rem', flexWrap: 'nowrap' }}>
+              
+              {/* Google Drive (Active) */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }} title="구글 드라이브: 학급 명단 및 데이터 자동 저장">
+                <div style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src="/google-drive.svg" alt="Google Drive" style={{ width: '26px', height: '26px', objectFit: 'contain' }} />
+                </div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#334155' }}>Drive</span>
+              </div>
+
+              {/* Google Sheets (Active) */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }} title="구글 스프레드시트: 학생별 타임라인 로그 DB">
+                <div style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src="/google-sheets.svg" alt="Google Sheets" style={{ width: '26px', height: '26px', objectFit: 'contain' }} />
+                </div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#334155' }}>Sheets</span>
+              </div>
+
+              {/* Google Slides (Active) */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem' }} title="구글 슬라이드: 발표 및 모둠 협업 실시간 모니터링">
+                <div style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src="/google-slides.svg" alt="Google Slides" style={{ width: '26px', height: '26px', objectFit: 'contain' }} />
+                </div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#334155' }}>Slides</span>
+              </div>
+
+              {/* Google Docs (Upcoming / Muted Grayscale) */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem', opacity: 0.55, filter: 'grayscale(0.65)' }} title="구글 문서: 글쓰기 및 개별 첨삭 과정 모니터링 (연동 준비 중)">
+                <div style={{ position: 'relative', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src="/google-docs.svg" alt="Google Docs" style={{ width: '26px', height: '26px', objectFit: 'contain' }} />
+                  <span style={{ 
+                    position: 'absolute', 
+                    top: '-6px', 
+                    right: '-10px', 
+                    fontSize: '0.55rem', 
+                    fontWeight: 900, 
+                    backgroundColor: '#e2e8f0', 
+                    color: '#475569', 
+                    padding: '0.05rem 0.3rem', 
+                    borderRadius: '4px',
+                    lineHeight: '1.2'
+                  }}>
+                    예정
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b' }}>Docs</span>
+              </div>
+
+              {/* Google Forms (Upcoming / Muted Grayscale) */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem', opacity: 0.55, filter: 'grayscale(0.65)' }} title="구글 설문지: 설문 및 퀴즈 실시간 응답 분석 (연동 준비 중)">
+                <div style={{ position: 'relative', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src="/google-forms.svg" alt="Google Forms" style={{ width: '26px', height: '26px', objectFit: 'contain' }} />
+                  <span style={{ 
+                    position: 'absolute', 
+                    top: '-6px', 
+                    right: '-10px', 
+                    fontSize: '0.55rem', 
+                    fontWeight: 900, 
+                    backgroundColor: '#e2e8f0', 
+                    color: '#475569', 
+                    padding: '0.05rem 0.3rem', 
+                    borderRadius: '4px',
+                    lineHeight: '1.2'
+                  }}>
+                    예정
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b' }}>Forms</span>
+              </div>
+
+            </div>
+
+            <div style={{ fontSize: '0.74rem', color: '#94a3b8', lineHeight: '1.45' }}>
+              기록은 개인 구글 시트에 기록되고,<br />
+              파일은 구글 드라이브에 안전하게 저장됩니다.
+            </div>
           </div>
+          
         </div>
+
+        {/* Subtle Signature Stamp */}
+        <MadeByStamp style={{ position: 'relative', marginTop: '1rem', paddingBottom: '0.5rem' }} />
       </div>
     );
   }
@@ -363,18 +460,18 @@ export default function Home() {
         justifyContent: 'space-between', 
         alignItems: 'center' 
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-            <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-            <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-            <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-            <rect x="18" y="24" width="8" height="2" fill="white"/>
-            <rect x="18" y="28" width="12" height="2" fill="white"/>
-          </svg>
-          <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-            G배움 로그
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <svg width="24" height="24" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            <span style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+              배움 로그
+            </span>
+          </div>
           <span style={{ 
             fontSize: '0.75rem', 
             fontWeight: 700, 
@@ -406,13 +503,13 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main content body (starts from top, container width constrained) */}
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '2.5rem 1.5rem' }}>
+      {/* Main content body (Full-width modern app layout: Left Sidebar + Right Workspace) */}
+      <main style={{ width: '100%', maxWidth: '1600px', margin: '0 auto', padding: '1.75rem 2rem' }}>
         
         {sdkStatus === 'loading' && (
-          <div className="card" style={{ textAlign: 'center', padding: '3rem', maxWidth: '450px', margin: '3rem auto' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '48px', height: '48px', borderRadius: '50%', color: 'var(--brand-green-dark)', animation: 'spin 1.5s linear infinite', marginBottom: '1rem' }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <div style={{ textAlign: 'center', padding: '6rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1.25rem' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="2" x2="12" y2="6" />
                 <line x1="12" y1="18" x2="12" y2="22" />
                 <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
@@ -423,7 +520,7 @@ export default function Home() {
                 <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
               </svg>
             </div>
-            <h3 style={{ fontWeight: 800 }}>구글 연결 모듈 초기화 중...</h3>
+            <h3 style={{ fontWeight: 800, color: 'var(--text-main)', margin: 0, fontSize: '1.2rem' }}>구글 연결 모듈 초기화 중...</h3>
           </div>
         )}
 
@@ -460,120 +557,303 @@ export default function Home() {
         {sdkStatus === 'ready' && isAuthenticated && (
           <div style={{ width: '100%' }}>
             {isLoadingList ? (
-              <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-                학급 목록 불러오는 중...
+              <div style={{ textAlign: 'center', padding: '6rem 1rem', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '48px', height: '48px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1rem' }}>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="2" x2="12" y2="6" />
+                    <line x1="12" y1="18" x2="12" y2="22" />
+                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                    <line x1="2" y1="12" x2="6" y2="12" />
+                    <line x1="18" y1="12" x2="22" y2="12" />
+                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+                  </svg>
+                </div>
+                <h3 style={{ fontWeight: 800, color: 'var(--text-main)', margin: 0, fontSize: '1.2rem' }}>학급 목록 불러오는 중...</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '0.45rem' }}>내 구글 드라이브의 학급 데이터를 안전하게 조회하고 있습니다.</p>
               </div>
             ) : (
-              <div>
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
-                  내 학급 목록
-                </h2>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1.25rem' }}>
-                  {/* 1. "학급 만들기" card */}
-                  <div 
-                    className="card"
-                    style={{ 
-                      borderStyle: 'dashed', 
-                      borderWidth: '2px', 
-                      borderColor: 'var(--brand-green-dark)', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      alignItems: 'center', 
-                      justifyContent: 'center', 
-                      minHeight: '160px', 
-                      cursor: 'pointer',
-                      backgroundColor: 'transparent'
+              /* Modern 2-Column Dashboard (Left Guide/Action Card + Right Class Cards Grid) */
+              <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                
+                {/* Left Panel: Class Creation Guide & Action (320px fixed width) */}
+                <div style={{ flex: '0 0 320px', width: '320px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  
+                  {/* Main Create Class Button */}
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{
+                      width: '100%',
+                      padding: '1rem 1.25rem',
+                      fontSize: '1rem',
+                      fontWeight: 800,
+                      borderRadius: '14px',
+                      boxShadow: '0 6px 16px rgba(22, 101, 52, 0.25)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.6rem',
+                      cursor: 'pointer'
                     }}
                     onClick={() => setShowCreateModal(true)}
                   >
-                    <span style={{ fontSize: '2.5rem', color: 'var(--brand-green-dark)', fontWeight: '300' }}>＋</span>
-                    <span style={{ fontWeight: 800, color: 'var(--brand-green-dark)', marginTop: '0.5rem' }}>새 학급 만들기</span>
-                  </div>
+                    <span style={{ fontSize: '1.3rem', lineHeight: '1' }}>＋</span> 새 학급 등록하기
+                  </button>
 
-                  {/* 2. Registered class roster cards */}
-                  {rosterList.map((className) => (
-                    <div 
-                      key={className}
-                      className="card"
-                      style={{ 
-                        display: 'flex', 
-                        flexDirection: 'column', 
-                        justifyContent: 'space-between',
-                        minHeight: '160px', 
-                        cursor: 'pointer',
-                        position: 'relative'
-                      }}
-                      onClick={() => router.push(`/class/${encodeURIComponent(className)}`)}
-                    >
-                      {/* Delete (X) button */}
-                      <button
-                        type="button"
-                        title="학급 삭제"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setClassToDelete(className);
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: '0.65rem',
-                          right: '0.65rem',
-                          width: '24px',
-                          height: '24px',
-                          borderRadius: '50%',
-                          border: '1px solid transparent',
-                          backgroundColor: 'transparent',
-                          color: '#94a3b8',
-                          fontSize: '1.1rem',
-                          fontWeight: 900,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          zIndex: 10
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#fee2e2';
-                          e.currentTarget.style.color = '#ef4444';
-                          e.currentTarget.style.borderColor = '#fca5a5';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = '#94a3b8';
-                          e.currentTarget.style.borderColor = 'transparent';
-                        }}
-                      >
-                        &times;
-                      </button>
+                  {/* Step-by-Step Registration Guide Card */}
+                  <div className="card" style={{ padding: '1.5rem', borderRadius: '18px', backgroundColor: '#ffffff' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                      {/* Google 4-Color Footprints Emblem */}
+                      <svg width="22" height="22" viewBox="0 0 48 48">
+                        <ellipse cx="16" cy="30" rx="6.5" ry="9.5" transform="rotate(-15 16 30)" fill="#4285F4"/>
+                        <circle cx="10" cy="16.5" r="2" fill="#4285F4"/>
+                        <circle cx="14" cy="14.5" r="2.2" fill="#34A853"/>
+                        <circle cx="18.5" cy="15" r="2" fill="#34A853"/>
+                        <circle cx="22.5" cy="17" r="1.8" fill="#34A853"/>
+                        <ellipse cx="32" cy="20" rx="6.5" ry="9.5" transform="rotate(15 32 20)" fill="#EA4335"/>
+                        <circle cx="26" cy="6.5" r="2" fill="#FBBC05"/>
+                        <circle cx="30.5" cy="4.5" r="2.2" fill="#FBBC05"/>
+                        <circle cx="35" cy="5" r="2" fill="#EA4335"/>
+                        <circle cx="39" cy="7" r="1.8" fill="#EA4335"/>
+                      </svg>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 900, color: 'var(--text-main)' }}>
+                        학급 등록 안내
+                      </span>
+                    </div>
 
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', paddingRight: '1.5rem' }}>
-                          <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-                            <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-                            <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-                            <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-                            <rect x="18" y="24" width="8" height="2" fill="white"/>
-                            <rect x="18" y="28" width="12" height="2" fill="white"/>
-                          </svg>
-                          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>{className}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                      <div style={{ display: 'flex', gap: '0.65rem' }}>
+                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                          1
                         </div>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                          클릭하여 과제 배부 및 대시보드로 진입합니다.
-                        </p>
+                        <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                          <strong>학급명 입력:</strong> 관리할 반 이름(예: <code>5학년 2반</code>)을 적습니다.
+                        </div>
                       </div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                        <span style={{ fontSize: '0.85rem', color: 'var(--brand-green-dark)', fontWeight: 'bold' }}>입장하기 ➔</span>
+
+                      <div style={{ display: 'flex', gap: '0.65rem' }}>
+                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                          2
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                          <strong>명단 입력 (개인정보 안심):</strong> <code>번호 이름</code> 또는 개인정보 보호를 위해 <strong><code>번호(1~25)</code>만</strong> 등록해도 완벽하게 작동합니다.
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.65rem' }}>
+                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#ecfdf5', color: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 900, flexShrink: 0, marginTop: '2px' }}>
+                          3
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#334155', lineHeight: '1.45' }}>
+                          <strong>과제 1초 배부:</strong> 구글 슬라이드/독스 템플릿 링크를 넣으면 학생별 개인 사본이 즉시 완성됩니다.
+                        </div>
                       </div>
                     </div>
-                  ))}
+
+                    <div style={{ marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>총 개설 학급</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 900, color: 'var(--brand-green-dark)', backgroundColor: '#f0fdf4', padding: '0.15rem 0.6rem', borderRadius: '6px' }}>
+                        {rosterList.length}개
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* CSV Template Download Pill Link */}
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={downloadCSVTemplate}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        fontSize: '0.8rem',
+                        color: '#64748b',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        padding: '0.3rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      <span>학생 명단 CSV 양식 다운로드</span>
+                    </button>
+                  </div>
+
                 </div>
+
+                {/* Right Main Area: Clean Class Grid (Fills 100% of remaining width) */}
+                <div style={{ flex: 1, minWidth: '320px' }}>
+                  
+                  {rosterList.length === 0 ? (
+                    /* Empty State */
+                    <div 
+                      className="card"
+                      style={{ 
+                        borderStyle: 'dashed', 
+                        borderWidth: '2px', 
+                        borderColor: '#a7f3d0', 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        padding: '4.5rem 2rem', 
+                        cursor: 'pointer',
+                        backgroundColor: '#f0fdf4',
+                        borderRadius: '18px',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onClick={() => setShowCreateModal(true)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--brand-green-dark)', marginBottom: '1rem' }}>
+                        <span style={{ fontSize: '2.2rem', fontWeight: 900, lineHeight: 1 }}>＋</span>
+                      </div>
+                      <span style={{ fontWeight: 900, color: 'var(--brand-green-dark)', fontSize: '1.2rem' }}>첫 번째 학급을 등록해 보세요</span>
+                      <span style={{ fontSize: '0.88rem', color: '#059669', marginTop: '0.45rem' }}>학생 명단을 등록하면 바로 슬라이드/독스 과제를 배부하고 실시간 모니터링을 시작할 수 있습니다.</span>
+                    </div>
+                  ) : (
+                    /* Class Cards Grid - Soft Light Green Themed */
+                    <div style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+                      gap: '1.25rem' 
+                    }}>
+                      {rosterList.map((className) => (
+                        <div 
+                          key={className}
+                          className="card"
+                          style={{ 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            justifyContent: 'space-between',
+                            minHeight: '155px', 
+                            cursor: 'pointer',
+                            position: 'relative',
+                            borderRadius: '18px',
+                            padding: '1.5rem',
+                            transition: 'all 0.2s ease',
+                            backgroundColor: '#f0fdf4',
+                            border: '1.5px solid #bbf7d0',
+                            boxShadow: '0 2px 6px rgba(16, 185, 129, 0.05)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-3px)';
+                            e.currentTarget.style.boxShadow = '0 12px 20px -4px rgba(16, 185, 129, 0.15)';
+                            e.currentTarget.style.borderColor = '#86efac';
+                            e.currentTarget.style.backgroundColor = '#ecfdf5';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.05)';
+                            e.currentTarget.style.borderColor = '#bbf7d0';
+                            e.currentTarget.style.backgroundColor = '#f0fdf4';
+                          }}
+                          onClick={() => router.push(`/class/${encodeURIComponent(className)}`)}
+                        >
+                          {/* Delete (X) button */}
+                          <button
+                            type="button"
+                            title="학급 삭제"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setClassToDelete(className);
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: '1rem',
+                              right: '1rem',
+                              width: '28px',
+                              height: '28px',
+                              borderRadius: '50%',
+                              border: '1px solid transparent',
+                              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                              color: '#94a3b8',
+                              fontSize: '1.15rem',
+                              fontWeight: 900,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              zIndex: 10
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#fee2e2';
+                              e.currentTarget.style.color = '#ef4444';
+                              e.currentTarget.style.borderColor = '#fca5a5';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+                              e.currentTarget.style.color = '#94a3b8';
+                              e.currentTarget.style.borderColor = 'transparent';
+                            }}
+                          >
+                            &times;
+                          </button>
+
+                          <div>
+                            <div style={{ marginBottom: '0.4rem', paddingRight: '2rem' }}>
+                              <h3 style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {className}
+                              </h3>
+                            </div>
+                            <p style={{ color: '#047857', fontSize: '0.82rem', margin: 0, fontWeight: 600 }}>
+                              구글 워크스페이스 실시간 연동
+                            </p>
+                          </div>
+
+                          <div style={{ 
+                            marginTop: '1.25rem', 
+                            paddingTop: '0.85rem', 
+                            borderTop: '1px solid rgba(187, 247, 208, 0.6)', 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center' 
+                          }}>
+                            <span style={{ 
+                              fontSize: '0.82rem', 
+                              fontWeight: 800, 
+                              color: 'var(--brand-green-dark)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}>
+                              과제 목록 열기 ➔
+                            </span>
+                            <span style={{ 
+                              fontSize: '0.72rem', 
+                              backgroundColor: '#ffffff', 
+                              color: '#15803d', 
+                              padding: '0.2rem 0.55rem', 
+                              borderRadius: '6px',
+                              fontWeight: 800,
+                              border: '1px solid #bbf7d0'
+                            }}>
+                              등록 완료
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
+
               </div>
             )}
           </div>
         )}
+
+        {/* Subtle Signature Stamp */}
+        <MadeByStamp />
       </main>
 
       {/* ➕ Create Class Modal */}
@@ -582,12 +862,16 @@ export default function Home() {
           <div className="custom-modal-content" style={{ maxWidth: '550px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <svg width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M38 14H30V6H10C8.9 6 8 6.9 8 8V40C8 41.1 8.9 42 10 42H38C39.1 42 40 41.1 40 40V16C40 14.9 39.1 14 38 14Z" fill="#F4B400"/>
-                <path d="M40 14L30 6V14H40Z" fill="#DB9A00"/>
-                <rect x="14" y="20" width="20" height="14" rx="2" fill="white"/>
-                <rect x="16" y="22" width="16" height="10" fill="#F4B400"/>
-                <rect x="18" y="24" width="8" height="2" fill="white"/>
-                <rect x="18" y="28" width="12" height="2" fill="white"/>
+                <ellipse cx="16" cy="30" rx="6.5" ry="9.5" transform="rotate(-15 16 30)" fill="#4285F4"/>
+                <circle cx="10" cy="16.5" r="2" fill="#4285F4"/>
+                <circle cx="14" cy="14.5" r="2.2" fill="#34A853"/>
+                <circle cx="18.5" cy="15" r="2" fill="#34A853"/>
+                <circle cx="22.5" cy="17" r="1.8" fill="#34A853"/>
+                <ellipse cx="32" cy="20" rx="6.5" ry="9.5" transform="rotate(15 32 20)" fill="#EA4335"/>
+                <circle cx="26" cy="6.5" r="2" fill="#FBBC05"/>
+                <circle cx="30.5" cy="4.5" r="2.2" fill="#FBBC05"/>
+                <circle cx="35" cy="5" r="2" fill="#EA4335"/>
+                <circle cx="39" cy="7" r="1.8" fill="#EA4335"/>
               </svg>
               새 학급 등록
             </div>
@@ -638,11 +922,16 @@ export default function Home() {
 
                 {uploadMethod === 'text' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    <label style={{ fontWeight: 700, fontSize: '0.85rem' }}>학생 목록</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontWeight: 700, fontSize: '0.85rem' }}>학생 명단</label>
+                      <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 700 }}>
+                        💡 개인정보 보호: 번호만 입력해도 OK
+                      </span>
+                    </div>
                     <textarea 
                       className="horizontal-form-input" 
                       rows={6}
-                      placeholder="한 줄에 번호와 이름을 적어주세요.&#10;예)&#10;1 홍길동&#10;2 김철수&#10;3 이영희"
+                      placeholder="한 줄에 '번호 이름' 또는 '번호만' 적어주세요.&#10;&#10;[예시 1 - 이름 포함]&#10;1 홍길동&#10;2 김철수&#10;&#10;[예시 2 - 개인정보 보호: 번호만]&#10;1&#10;2&#10;3"
                       value={studentListInput}
                       onChange={(e) => setStudentListInput(e.target.value)}
                       style={{ resize: 'vertical' }}
@@ -709,7 +998,18 @@ export default function Home() {
       {isSaving && (
         <div className="custom-modal-backdrop">
           <div className="custom-modal-content" style={{ textAlign: 'center', padding: '2.5rem 1.5rem', maxWidth: '400px' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '1.25rem', animation: 'spin 2.5s linear infinite' }}>🟡</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', color: 'var(--brand-green-dark)', animation: 'spin 1s linear infinite', marginBottom: '1.25rem' }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="2" x2="12" y2="6" />
+                <line x1="12" y1="18" x2="12" y2="22" />
+                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                <line x1="2" y1="12" x2="6" y2="12" />
+                <line x1="18" y1="12" x2="22" y2="12" />
+                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+              </svg>
+            </div>
             <h3 style={{ fontWeight: 800, fontSize: '1.25rem', marginBottom: '0.5rem' }}>학급 데이터 등록 중...</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
               선생님 구글 드라이브의 명단 시트 파일에 탭을 생성하고 학생 정보를 기입하고 있습니다.
