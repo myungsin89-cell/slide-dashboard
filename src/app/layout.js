@@ -2,8 +2,8 @@ import Script from "next/script";
 import "./globals.css";
 
 export const metadata = {
-  title: "슬라이드 대시보드 - 과정 평가 피드백 대시보드",
-  description: "구글 슬라이드를 활용한 실시간 과정 평가 및 피드백 대시보드",
+  title: "G배움 로그 - 실시간 구글 학습 과정평가 대시보드",
+  description: "구글 슬라이드 및 독스를 활용한 실시간 과정 중심 평가 및 피드백 대시보드",
   icons: {
     icon: '/google-slides.svg',
     shortcut: '/google-slides.svg',

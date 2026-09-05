@@ -158,7 +158,7 @@ export default function Home() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "슬라이드대시보드_명단양식.csv");
+    link.setAttribute("download", "G배움로그_명단양식.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -279,11 +279,11 @@ export default function Home() {
                   style={{ width: '34px', height: '34px', objectFit: 'contain' }}
                 />
                 <h1 style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.03em', lineHeight: '1' }}>
-                  슬라이드 대시보드
+                  G배움 로그
                 </h1>
               </div>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
-                구글 슬라이드 기반의 과정 중심 평가 피드백 도구
+                구글 워크스페이스(슬라이드·문서) 기반 실시간 과정중심 평가 도구
               </p>
             </div>
 
@@ -373,7 +373,7 @@ export default function Home() {
             <rect x="18" y="28" width="12" height="2" fill="white"/>
           </svg>
           <span style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-            슬라이드 대시보드
+            G배움 로그
           </span>
           <span style={{ 
             fontSize: '0.75rem', 

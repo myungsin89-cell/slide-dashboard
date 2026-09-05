@@ -639,10 +639,10 @@ export async function appendActivityLogs(spreadsheetId, logs) {
  * 8. 학급 명단 저장소 파일 검색 및 생성
  */
 async function getOrCreateRosterSpreadsheet() {
-  // 1) "슬라이드대시보드_학급명단_저장소" 파일이 드라이브에 있는지 검색
+  // 1) "G배움로그_학급명단_저장소" 또는 기존 "슬라이드대시보드_학급명단_저장소" 파일 검색
   const listResp = await window.gapi.client.drive.files.list({
-    q: "name = '슬라이드대시보드_학급명단_저장소' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
-    fields: 'files(id)'
+    q: "(name = 'G배움로그_학급명단_저장소' or name = '슬라이드대시보드_학급명단_저장소') and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+    fields: 'files(id, name)'
   });
 
   const files = listResp.result.files || [];
@@ -653,7 +653,7 @@ async function getOrCreateRosterSpreadsheet() {
   // 2) 없으면 새로 만들기
   const createResp = await window.gapi.client.sheets.spreadsheets.create({
     resource: {
-      properties: { title: '슬라이드대시보드_학급명단_저장소' }
+      properties: { title: 'G배움로그_학급명단_저장소' }
     }
   });
   return createResp.result.spreadsheetId;
@@ -720,7 +720,7 @@ export async function fetchClassRosters() {
   if (!getAccessToken()) throw new Error('Not authenticated');
 
   const listResp = await window.gapi.client.drive.files.list({
-    q: "name = '슬라이드대시보드_학급명단_저장소' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+    q: "(name = 'G배움로그_학급명단_저장소' or name = '슬라이드대시보드_학급명단_저장소') and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
     fields: 'files(id)'
   });
 
@@ -746,7 +746,7 @@ export async function loadClassRoster(rosterName) {
   if (!getAccessToken()) throw new Error('Not authenticated');
 
   const listResp = await window.gapi.client.drive.files.list({
-    q: "name = '슬라이드대시보드_학급명단_저장소' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+    q: "(name = 'G배움로그_학급명단_저장소' or name = '슬라이드대시보드_학급명단_저장소') and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
     fields: 'files(id)'
   });
 
@@ -773,7 +773,7 @@ export async function deleteClassRoster(rosterName) {
   if (!getAccessToken()) throw new Error('Not authenticated');
 
   const listResp = await window.gapi.client.drive.files.list({
-    q: "name = '슬라이드대시보드_학급명단_저장소' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+    q: "(name = 'G배움로그_학급명단_저장소' or name = '슬라이드대시보드_학급명단_저장소') and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
     fields: 'files(id)'
   });
 

@@ -125,10 +125,10 @@ export default function StudentPortal() {
           </div>
 
           <h1 style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--brand-green-dark)', margin: '0 0 0.5rem 0' }}>
-            슬라이드 과제 접속
+            수업 과제 접속
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', margin: '0 0 1.75rem 0', lineHeight: '1.5' }}>
-            선생님이 칠판에 안내해 주신 <strong>숫자 4자리 접속 코드</strong>를 입력하세요.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', margin: '0 0 1.75rem 0', lineHeight: '1.5' }}>
+            선생님이 안내해 주신 <strong>숫자 4자리 접속 코드</strong>를 입력하세요.
           </p>
 
           <form onSubmit={handleVerifyCode} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
