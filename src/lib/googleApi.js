@@ -372,6 +372,30 @@ export async function duplicateSlideForStudents(templateId, studentsList, spread
     }
   });
 
+  // 4) 템플릿 기준선(Baseline) 측정 및 activity_logs에 기록 (순수 학생 작업량 집계용)
+  try {
+    const templateStats = await fetchSlideStats(templateId);
+    await window.gapi.client.sheets.spreadsheets.values.append({
+      spreadsheetId: spreadsheetId,
+      range: 'activity_logs!A2',
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: [[
+          'SYSTEM_BASELINE',
+          new Date().toISOString(),
+          templateStats.charCount || 0,
+          templateStats.slideCount || 0,
+          templateStats.imageCount || 0,
+          templateStats.keywordsUsed ? templateStats.keywordsUsed.length : 0,
+          'TEMPLATE_BASELINE'
+        ]]
+      }
+    });
+  } catch (baseErr) {
+    console.warn('[SlideSight] 템플릿 기준선 측정 실패 (대체 계산 사용):', baseErr);
+  }
+
   return studentsResults;
 }
 
@@ -391,6 +415,7 @@ export async function fetchSlideStats(slideId, keywords = []) {
   const slideCount = slides.length;
 
   let totalCharCount = 0;
+  let totalCharCountWithSpaces = 0;
   let imageCount = 0;
   let blankSlideCount = 0;
   let allText = '';
@@ -400,60 +425,69 @@ export async function fetchSlideStats(slideId, keywords = []) {
   const processElement = (element) => {
     if (!element) return;
 
-    // 1) 텍스트 상자 및 도형 텍스트
+    // 1) 그룹(elementGroup) 하위 요소 재귀 탐색 (그룹화된 텍스트 및 이미지 누락 방지)
+    if (element.elementGroup && Array.isArray(element.elementGroup.children)) {
+      element.elementGroup.children.forEach(child => processElement(child));
+      return;
+    }
+
+    // 2) 순수 삽입된 이미지 객체만 카운트 (도형 배경 채우기, 차트 등 제외)
+    if (element.image) {
+      imageCount++;
+    }
+
+    // 3) 텍스트 추출 (텍스트 상자 또는 도형 텍스트)
     if (element.shape && element.shape.text && element.shape.text.textElements) {
-      element.shape.text.textElements.forEach(te => {
+      const textElements = element.shape.text.textElements || [];
+      textElements.forEach(te => {
         if (te.textRun && te.textRun.content) {
           const content = te.textRun.content;
-          allText += content + ' ';
-          const clean = content.replace(/\s/g, '');
-          if (clean.length > 0) {
-            totalCharCount += clean.length;
+          allText += content + '\n';
+          const cleanText = content.replace(/\s/g, '');
+          const cleanWithSpaces = content.replace(/[\r\n]/g, '');
+          if (cleanText.length > 0) {
+            totalCharCount += cleanText.length;
+            totalCharCountWithSpaces += cleanWithSpaces.length;
           }
         }
       });
     }
 
-    // 2) 표 텍스트
+    // 4) 워드아트(WordArt) 텍스트 추출
+    if (element.wordArt && element.wordArt.renderedText) {
+      const content = element.wordArt.renderedText;
+      allText += content + '\n';
+      const cleanText = content.replace(/\s/g, '');
+      const cleanWithSpaces = content.replace(/[\r\n]/g, '');
+      if (cleanText.length > 0) {
+        totalCharCount += cleanText.length;
+        totalCharCountWithSpaces += cleanWithSpaces.length;
+      }
+    }
+
+    // 5) 테이블 텍스트 추출
     if (element.table && element.table.tableRows) {
-      element.table.tableRows.forEach(row => {
-        (row.tableCells || []).forEach(cell => {
+      const tableRows = element.table.tableRows || [];
+      tableRows.forEach(row => {
+        const cells = row.tableCells || [];
+        cells.forEach(cell => {
           if (cell.text && cell.text.textElements) {
-            cell.text.textElements.forEach(te => {
+            const textElements = cell.text.textElements || [];
+            textElements.forEach(te => {
               if (te.textRun && te.textRun.content) {
                 const content = te.textRun.content;
-                allText += content + ' ';
-                const clean = content.replace(/\s/g, '');
-                if (clean.length > 0) {
-                  totalCharCount += clean.length;
+                allText += content + '\n';
+                const cleanText = content.replace(/\s/g, '');
+                const cleanWithSpaces = content.replace(/[\r\n]/g, '');
+                if (cleanText.length > 0) {
+                  totalCharCount += cleanText.length;
+                  totalCharCountWithSpaces += cleanWithSpaces.length;
                 }
               }
             });
           }
         });
       });
-    }
-
-    // 3) 그룹화된 개체 (Group) 재귀 탐색 - 그룹 내 텍스트박스 누락 방지
-    if (element.elementGroup && element.elementGroup.children) {
-      element.elementGroup.children.forEach(child => {
-        processElement(child);
-      });
-    }
-
-    // 4) 워드아트 (WordArt) 텍스트
-    if (element.wordArt && element.wordArt.renderedText) {
-      const content = element.wordArt.renderedText;
-      allText += content + ' ';
-      const clean = content.replace(/\s/g, '');
-      if (clean.length > 0) {
-        totalCharCount += clean.length;
-      }
-    }
-
-    // 5) 이미지 카운트
-    if (element.image) {
-      imageCount++;
     }
   };
 
@@ -502,6 +536,7 @@ export async function fetchSlideStats(slideId, keywords = []) {
   return {
     slideCount,
     charCount: totalCharCount,
+    charCountWithSpaces: totalCharCountWithSpaces,
     imageCount,
     blankSlideCount,
     keywordsUsed: Array.from(foundKeywords),
@@ -589,17 +624,31 @@ export async function loadSpreadsheetData(spreadsheetId) {
   );
 
   const logRows = logsResp.result.values || [];
-  const logs = logRows.map(row => ({
-    name: row[0] || '',
-    timestamp: row[1] || '',
-    charCount: row[2] ? parseInt(row[2]) : 0,
-    slideCount: row[3] ? parseInt(row[3]) : 0,
-    imageCount: row[4] ? parseInt(row[4]) : 0,
-    keywordCount: row[5] ? parseInt(row[5]) : 0,
-    copiedText: row[6] || ''
-  }));
+  let baseline = null;
+  const filteredLogs = [];
 
-  return { students, logs };
+  logRows.forEach(row => {
+    if (row[0] === 'SYSTEM_BASELINE') {
+      baseline = {
+        charCount: row[2] ? parseInt(row[2]) : 0,
+        slideCount: row[3] ? parseInt(row[3]) : 0,
+        imageCount: row[4] ? parseInt(row[4]) : 0,
+        keywordCount: row[5] ? parseInt(row[5]) : 0
+      };
+    } else {
+      filteredLogs.push({
+        name: row[0] || '',
+        timestamp: row[1] || '',
+        charCount: row[2] ? parseInt(row[2]) : 0,
+        slideCount: row[3] ? parseInt(row[3]) : 0,
+        imageCount: row[4] ? parseInt(row[4]) : 0,
+        keywordCount: row[5] ? parseInt(row[5]) : 0,
+        copiedText: row[6] || ''
+      });
+    }
+  });
+
+  return { students, logs: filteredLogs, baseline };
 }
 
 /**

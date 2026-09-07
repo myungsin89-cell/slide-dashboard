@@ -304,7 +304,10 @@ export default function Dashboard() {
   }, [isPolling, isAutoPaused]);
   const [pollingTick, setPollingTick] = useState(0); 
   const pollingRef = useRef(null);
+  const isPollingBusyRef = useRef(false);
   const studentsRef = useRef([]);
+  const [templateBaseline, setTemplateBaseline] = useState({ charCount: 0, imageCount: 0, slideCount: 0 });
+  const templateBaselineRef = useRef({ charCount: 0, imageCount: 0, slideCount: 0 });
 
   useEffect(() => {
     studentsRef.current = students;
@@ -472,7 +475,7 @@ export default function Dashboard() {
   };
 
   // Background live slide syncing & offline revision backfilling (non-blocking)
-  const syncLiveSlideStatsAndBackfill = async (baseStudents, baseLogs) => {
+  const syncLiveSlideStatsAndBackfill = async (baseStudents, baseLogs, initialBaseline = null) => {
     setIsBackgroundSyncing(true);
     try {
       const now = new Date();
@@ -480,7 +483,10 @@ export default function Dashboard() {
       const updatedStudents = [...baseStudents];
       let studentsDataUpdated = false;
 
-      // Check current live slide stats and revision history for each student (conservative concurrency)
+      let activeBaseline = initialBaseline || templateBaselineRef.current || { charCount: 0, imageCount: 0, slideCount: 0 };
+      const collectedStats = [];
+
+      // 1) 학생들의 실시간 슬라이드 stats 및 드라이브 revision 수집 (3명씩 배치)
       const CONCURRENCY = 3;
       for (let i = 0; i < updatedStudents.length; i += CONCURRENCY) {
         const chunk = updatedStudents.slice(i, i + CONCURRENCY);
@@ -489,10 +495,9 @@ export default function Dashboard() {
             if (!student.slideId) return;
 
             try {
-              // 1) Fetch current slide stats
-              const stats = await fetchSlideStats(student.slideId, keywordsRef.current.length > 0 ? keywordsRef.current : keywords);
+              const activeKeywords = (keywordsRef?.current && keywordsRef.current.length > 0) ? keywordsRef.current : keywords;
+              const stats = await fetchSlideStats(student.slideId, activeKeywords);
 
-              // 2) Fetch revision history from Google Drive
               let revisions = [];
               try {
                 const revResp = await executeWithRetry(() =>
@@ -506,108 +511,154 @@ export default function Dashboard() {
                 console.warn(`Failed to check revisions for ${student.name}:`, revErr);
               }
 
-              // Revisions index 0 is initial template copy creation.
-              // index 1+ are actual user edit revisions.
               const userRevisions = revisions.slice(1);
               const studentLogs = baseLogs.filter(l => l.name === student.name);
-
-              // Determine if student has ever worked:
-              // A student has worked ONLY if they created actual edit revisions after template copy,
-              // or if they already have logged activity in the sheet.
-              // (Template default text/images do NOT count as student work)
               const hasWorked = userRevisions.length > 0 || studentLogs.length > 0;
 
-              let nextStatus = 'disconnected';
-              let latestTime = student.lastActiveAt;
-
-              if (!hasWorked) {
-                nextStatus = 'disconnected';
-              } else {
-                if (userRevisions.length > 0) {
-                  latestTime = userRevisions[userRevisions.length - 1].modifiedTime;
-                } else if (!latestTime) {
-                  latestTime = now.toISOString();
-                }
-
-                const minutesSinceLastActive = (now.getTime() - new Date(latestTime).getTime()) / (1000 * 60);
-                if (student.status === 'suspicious') {
-                  nextStatus = 'suspicious';
-                } else if (minutesSinceLastActive <= 5) {
-                  nextStatus = 'active';
-                } else {
-                  nextStatus = 'idle';
-                }
-              }
-
-              const prevKwStr = (student.keywordsUsed || []).slice().sort().join(',');
-              const newKwStr = (stats.keywordsUsed || []).slice().sort().join(',');
-              const isKeywordsChanged = prevKwStr !== newKwStr;
-
-              if (
-                student.status !== nextStatus ||
-                student.charCount !== stats.charCount ||
-                student.slideCount !== stats.slideCount ||
-                student.imageCount !== stats.imageCount ||
-                isKeywordsChanged
-              ) {
-                studentsDataUpdated = true;
-              }
-
-              student.charCount = stats.charCount;
-              student.slideCount = stats.slideCount;
-              student.imageCount = stats.imageCount;
-              student.blankSlideCount = stats.blankSlideCount;
-              student.keywordsUsed = stats.keywordsUsed;
-              student.keywordCount = stats.keywordsUsed.length;
-              student.status = nextStatus;
-              if (latestTime) student.lastActiveAt = latestTime;
-              student.revisionId = stats.revisionId;
-              student.fullText = stats.fullText;
-
-              // Backfill offline activities from userRevisions if missing from spreadsheet logs
-              if (userRevisions.length > 0) {
-                const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
-
-                const newRevisions = userRevisions.filter(rev => {
-                  const revTimeMinutes = Math.round(new Date(rev.modifiedTime).getTime() / (60 * 1000));
-                  return !existingTimes.some(et => Math.abs(et - revTimeMinutes) <= 3);
-                });
-
-                if (newRevisions.length > 0) {
-                  const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : 0;
-                  const endChar = stats.charCount;
-                  const charDiff = Math.max(endChar - startChar, 0);
-                  const step = newRevisions.length > 0 ? charDiff / newRevisions.length : 0;
-
-                  newRevisions.forEach((rev, idx) => {
-                    const estimatedChar = Math.round(startChar + step * (idx + 1));
-                    const prevEstimatedChar = Math.round(startChar + step * idx);
-                    const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
-
-                    // Offline revisions do not have real-time text diff snippets.
-                    // Always record as clean text writing/editing without any "offline" or "suspicious" tags.
-                    missingLogs.push({
-                      name: student.name,
-                      timestamp: rev.modifiedTime,
-                      charCount: estimatedChar,
-                      slideCount: stats.slideCount,
-                      imageCount: stats.imageCount,
-                      keywordCount: stats.keywordsUsed.length,
-                      copiedText: diff > 0 
-                        ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
-                        : (stats.imageCount > 0 
-                            ? `[편집] 슬라이드 개체 및 이미지 자료 배치` 
-                            : `[편집] 슬라이드 내용 및 서식 수정`)
-                    });
-                  });
-                }
-              }
+              collectedStats.push({
+                student,
+                stats,
+                userRevisions,
+                studentLogs,
+                hasWorked
+              });
             } catch (studentErr) {
               console.warn(`Error analyzing live slide for ${student.name}:`, studentErr);
             }
           })
         );
       }
+
+      // 2) 템플릿 기준선이 아직 0인 경우(기존 과제), 미작업 학생 또는 최솟값으로 템플릿 baseline 자동 감지
+      if (activeBaseline.charCount === 0 && activeBaseline.imageCount === 0 && collectedStats.length > 0) {
+        const unworked = collectedStats.find(item => !item.hasWorked);
+        if (unworked) {
+          activeBaseline = {
+            charCount: unworked.stats.charCount || 0,
+            imageCount: unworked.stats.imageCount || 0,
+            slideCount: unworked.stats.slideCount || 0,
+            keywordCount: unworked.stats.keywordsUsed ? unworked.stats.keywordsUsed.length : 0
+          };
+        } else {
+          // 모든 학생이 작업한 경우 학생들 중 최소값을 템플릿 기준으로 추정
+          const minChars = Math.min(...collectedStats.map(c => c.stats.charCount || 0));
+          const minImgs = Math.min(...collectedStats.map(c => c.stats.imageCount || 0));
+          const minSlides = Math.min(...collectedStats.map(c => c.stats.slideCount || 0));
+          activeBaseline = {
+            charCount: minChars,
+            imageCount: minImgs,
+            slideCount: minSlides,
+            keywordCount: 0
+          };
+        }
+
+        setTemplateBaseline(activeBaseline);
+        templateBaselineRef.current = activeBaseline;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`template_baseline_${spreadsheetId}`, JSON.stringify(activeBaseline));
+        }
+
+        // 스프레드시트 activity_logs에 SYSTEM_BASELINE 영구 기록
+        try {
+          await appendActivityLogs(spreadsheetId, [{
+            name: 'SYSTEM_BASELINE',
+            timestamp: now.toISOString(),
+            charCount: activeBaseline.charCount,
+            slideCount: activeBaseline.slideCount,
+            imageCount: activeBaseline.imageCount,
+            keywordCount: activeBaseline.keywordCount,
+            copiedText: 'TEMPLATE_BASELINE'
+          }]);
+        } catch (saveBaseErr) {
+          console.warn('Failed to save baseline to sheet:', saveBaseErr);
+        }
+      }
+
+      // 3) 각 학생의 순수 추가 작업량(Net Added Work) 계산 및 동기화
+      collectedStats.forEach(({ student, stats, userRevisions, studentLogs, hasWorked }) => {
+        let nextStatus = 'disconnected';
+        let latestTime = student.lastActiveAt;
+
+        if (!hasWorked) {
+          nextStatus = 'disconnected';
+        } else {
+          if (userRevisions.length > 0) {
+            latestTime = userRevisions[userRevisions.length - 1].modifiedTime;
+          } else if (!latestTime) {
+            latestTime = now.toISOString();
+          }
+
+          const minutesSinceLastActive = (now.getTime() - new Date(latestTime).getTime()) / (1000 * 60);
+          if (student.status === 'suspicious') {
+            nextStatus = 'suspicious';
+          } else if (minutesSinceLastActive <= 5) {
+            nextStatus = 'active';
+          } else {
+            nextStatus = 'idle';
+          }
+        }
+
+        // 템플릿 대비 순수 추가 작업량 계산 (미작업 학생은 무조건 0)
+        const netCharCount = hasWorked ? Math.max(0, stats.charCount - activeBaseline.charCount) : 0;
+        const netImageCount = hasWorked ? Math.max(0, stats.imageCount - activeBaseline.imageCount) : 0;
+
+        if (
+          student.status !== nextStatus ||
+          student.charCount !== netCharCount ||
+          student.slideCount !== stats.slideCount ||
+          student.imageCount !== netImageCount
+        ) {
+          studentsDataUpdated = true;
+        }
+
+        student.charCount = netCharCount;
+        student.slideCount = stats.slideCount;
+        student.imageCount = netImageCount;
+        student.blankSlideCount = stats.blankSlideCount;
+        student.keywordsUsed = stats.keywordsUsed;
+        student.keywordCount = stats.keywordsUsed.length;
+        student.status = nextStatus;
+        if (latestTime) student.lastActiveAt = latestTime;
+        student.revisionId = stats.revisionId;
+        student.fullText = stats.fullText;
+
+        // Backfill offline activities from userRevisions if missing from spreadsheet logs
+        if (hasWorked && userRevisions.length > 0) {
+          const existingTimes = studentLogs.map(l => Math.round(new Date(l.timestamp).getTime() / (60 * 1000)));
+
+          const newRevisions = userRevisions.filter(rev => {
+            const revTimeMinutes = Math.round(new Date(rev.modifiedTime).getTime() / (60 * 1000));
+            return !existingTimes.some(et => Math.abs(et - revTimeMinutes) <= 3);
+          });
+
+          if (newRevisions.length > 0) {
+            const startChar = studentLogs.length > 0 ? studentLogs[studentLogs.length - 1].charCount : 0;
+            const endChar = netCharCount;
+            const charDiff = Math.max(endChar - startChar, 0);
+            const step = newRevisions.length > 0 ? charDiff / newRevisions.length : 0;
+
+            newRevisions.forEach((rev, idx) => {
+              const estimatedChar = Math.round(startChar + step * (idx + 1));
+              const prevEstimatedChar = Math.round(startChar + step * idx);
+              const diff = Math.max(estimatedChar - prevEstimatedChar, 0);
+
+              missingLogs.push({
+                name: student.name,
+                timestamp: rev.modifiedTime,
+                charCount: estimatedChar,
+                slideCount: stats.slideCount,
+                imageCount: netImageCount,
+                keywordCount: stats.keywordsUsed.length,
+                copiedText: diff > 0 
+                  ? `[작성] 슬라이드 본문 작성 (+${diff}자)` 
+                  : (netImageCount > 0 
+                      ? `[편집] 슬라이드 개체 및 이미지 자료 배치` 
+                      : `[편집] 슬라이드 내용 및 서식 수정`)
+              });
+            });
+          }
+        }
+      });
 
       // Persist updated students and missing offline logs to Google Spreadsheet DB
       if (missingLogs.length > 0) {
@@ -668,7 +719,27 @@ export default function Dashboard() {
       setClassTitle(match ? match[1] : rawName.replace('SlideSight_DB_', ''));
 
       // 1) First load existing sheet DB data and render immediately without delay
-      const { students: loadedStudents, logs: loadedLogs } = await loadSpreadsheetData(spreadsheetId);
+      const { students: loadedStudents, logs: loadedLogs, baseline } = await loadSpreadsheetData(spreadsheetId);
+
+      let currentBaseline = templateBaselineRef.current;
+      if (baseline) {
+        currentBaseline = baseline;
+        setTemplateBaseline(baseline);
+        templateBaselineRef.current = baseline;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`template_baseline_${spreadsheetId}`, JSON.stringify(baseline));
+        }
+      } else if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem(`template_baseline_${spreadsheetId}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            currentBaseline = parsed;
+            setTemplateBaseline(parsed);
+            templateBaselineRef.current = parsed;
+          } catch (e) {}
+        }
+      }
       
       const restoredLogs = [];
       const studentLastChars = {};
@@ -692,7 +763,7 @@ export default function Dashboard() {
       setPollingTick(avgTicks);
 
       // 2) Asynchronously sync live slide stats and backfill offline revision history in background
-      syncLiveSlideStatsAndBackfill(loadedStudents, loadedLogs);
+      syncLiveSlideStatsAndBackfill(loadedStudents, loadedLogs, currentBaseline);
 
     } catch (err) {
       console.error('Failed to load spreadsheet data:', err);
@@ -724,9 +795,15 @@ export default function Dashboard() {
     }
   };
 
-  // Poll Slide API
+  // Poll Slide API (4명씩 배치 분할 호출로 구글 API 429/503 할당량 초과 방지)
   const pollStudentSlides = async (customKeywords = null) => {
-    const activeKeywords = customKeywords || (keywordsRef.current.length > 0 ? keywordsRef.current : keywords);
+    if (isPollingBusyRef.current) {
+      console.log('Previous polling is still running, skipping tick...');
+      return;
+    }
+
+    isPollingBusyRef.current = true;
+    const activeKeywords = customKeywords || (keywordsRef?.current && keywordsRef.current.length > 0 ? keywordsRef.current : keywords);
     console.log('Polling student slides with keywords:', activeKeywords);
     const now = new Date();
     const updatedStudents = [...studentsRef.current];
@@ -735,159 +812,177 @@ export default function Dashboard() {
 
     setPollingTick(prev => prev + 1);
 
-    const CONCURRENCY = 4;
-    for (let i = 0; i < updatedStudents.length; i += CONCURRENCY) {
-      const chunk = updatedStudents.slice(i, i + CONCURRENCY);
-      await Promise.all(
-        chunk.map(async (student) => {
-          if (!student.slideId) return;
+    try {
+      const CONCURRENCY = 4; // 동시 4명씩 순차 처리하여 API 초과 차단
+      for (let i = 0; i < updatedStudents.length; i += CONCURRENCY) {
+        const chunk = updatedStudents.slice(i, i + CONCURRENCY);
 
-          try {
-            const stats = await fetchSlideStats(student.slideId, activeKeywords);
-            
-            const prevCharCount = student.charCount || 0;
-            const prevSlideCount = student.slideCount || 0;
-            const prevImageCount = student.imageCount || 0;
-            const prevRevisionId = student.revisionId || '';
-            const prevText = student.fullText || '';
-            const prevStatus = student.status;
+        await Promise.all(
+          chunk.map(async (student) => {
+            if (!student.slideId) return;
 
-            const charDiff = stats.charCount - prevCharCount;
-            const slideDiff = stats.slideCount - prevSlideCount;
-            const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
-            const isContentChanged = isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount;
+            try {
+              const stats = await fetchSlideStats(student.slideId, activeKeywords);
+              
+              const activeBaseline = templateBaselineRef.current || { charCount: 0, imageCount: 0, slideCount: 0 };
+              const prevCharCount = student.charCount || 0;
+              const prevSlideCount = student.slideCount || 0;
+              const prevImageCount = student.imageCount || 0;
+              const prevRevisionId = student.revisionId || '';
+              const prevText = student.fullText || '';
+              const prevStatus = student.status;
 
-            let nextStatus = prevStatus;
-            let nextLastActive = student.lastActiveAt || now.toISOString();
+              const isRevisionChanged = stats.revisionId && stats.revisionId !== prevRevisionId;
+              const hasWorked = prevStatus !== 'disconnected' || isRevisionChanged;
 
-            // 1) Actual interaction/content edit detected
-            if (isContentChanged) {
-              nextStatus = 'active';
-              nextLastActive = now.toISOString();
-              stateChanged = true;
+              // 템플릿 대비 순수 추가 작업량 계산 (미작업 학생은 무조건 0)
+              const netCharCount = hasWorked ? Math.max(0, stats.charCount - activeBaseline.charCount) : 0;
+              const netImageCount = hasWorked ? Math.max(0, stats.imageCount - activeBaseline.imageCount) : 0;
 
-              let diffTextSegment = '';
-              // Real-time polling is ~25s. Typing 180+ Korean characters in 25s (~500+ CPM) indicates likely copy-paste.
-              const isPasteSuspicious = charDiff >= 180;
-              if (isPasteSuspicious) {
-                nextStatus = 'suspicious';
-                diffTextSegment = extractDiffText(prevText, stats.fullText);
-              }
+              const charDiff = netCharCount - prevCharCount;
+              const slideDiff = stats.slideCount - prevSlideCount;
+              const isContentChanged = isRevisionChanged || charDiff !== 0 || slideDiff !== 0 || netImageCount !== prevImageCount;
 
-              const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
+              let nextStatus = prevStatus;
+              let nextLastActive = student.lastActiveAt || now.toISOString();
 
-              let logSnippet = '';
-              if (isPasteSuspicious && diffTextSegment) {
-                logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
-              } else if (addedTextSnippet) {
-                logSnippet = `[작성] "${addedTextSnippet}"`;
-              } else if (slideDiff > 0) {
-                logSnippet = `[슬라이드] 새 슬라이드 추가 (+${slideDiff}장)`;
-              } else if (stats.imageCount > prevImageCount) {
-                logSnippet = `[시각화] 이미지 자료 추가 (+${stats.imageCount - prevImageCount}개)`;
-              } else if (charDiff < 0) {
-                logSnippet = `[수정] 본문 텍스트 퇴고 및 정리 (${charDiff}자)`;
-              } else {
-                logSnippet = `[편집] 슬라이드 서식 및 개체 편집`;
-              }
+              // 1) Actual interaction/content edit detected
+              if (isContentChanged) {
+                nextStatus = 'active';
+                nextLastActive = now.toISOString();
+                stateChanged = true;
 
-              // Record log only when previous baseline exists and there is an actual delta
-              if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || stats.imageCount !== prevImageCount)) {
-                newLogs.push({
-                  name: student.name,
-                  timestamp: now.toISOString(),
-                  charCount: stats.charCount,
-                  charDiff: charDiff,
-                  slideCount: stats.slideCount,
-                  imageCount: stats.imageCount,
-                  keywordCount: stats.keywordsUsed.length,
-                  copiedText: logSnippet
-                });
-              }
-            } else {
-              // 2) Content unchanged during this tick
-              if (prevStatus === 'disconnected') {
-                // Never interacted / no edit revisions -> stay disconnected
-                nextStatus = 'disconnected';
-              } else {
-                // Interacted in the past -> active or idle based on idle time
-                const lastActiveTime = new Date(nextLastActive);
-                const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
-
-                if (minutesIdle >= 5) {
-                  if (prevStatus !== 'idle') {
-                    nextStatus = 'idle';
-                    stateChanged = true;
-                  }
-                } else if (prevStatus === 'suspicious') {
+                let diffTextSegment = '';
+                // Real-time polling is ~25s. Typing 180+ Korean characters in 25s (~500+ CPM) indicates likely copy-paste.
+                const isPasteSuspicious = charDiff >= 180;
+                if (isPasteSuspicious) {
                   nextStatus = 'suspicious';
+                  diffTextSegment = extractDiffText(prevText, stats.fullText);
+                }
+
+                const addedTextSnippet = charDiff > 0 ? extractDiffText(prevText, stats.fullText).substring(0, 100) : '';
+
+                let logSnippet = '';
+                if (isPasteSuspicious && diffTextSegment) {
+                  logSnippet = `[의심] 대량 복붙 의심: "${diffTextSegment.substring(0, 100)}"`;
+                } else if (addedTextSnippet) {
+                  logSnippet = `[작성] "${addedTextSnippet}"`;
+                } else if (slideDiff > 0) {
+                  logSnippet = `[슬라이드] 새 슬라이드 추가 (+${slideDiff}장)`;
+                } else if (netImageCount > prevImageCount) {
+                  logSnippet = `[시각화] 이미지 자료 추가 (+${netImageCount - prevImageCount}개)`;
+                } else if (charDiff < 0) {
+                  logSnippet = `[수정] 본문 텍스트 퇴고 및 정리 (${charDiff}자)`;
                 } else {
-                  nextStatus = 'active';
+                  logSnippet = `[편집] 슬라이드 서식 및 개체 편집`;
+                }
+
+                // Record log only when previous baseline exists and there is an actual delta
+                if (prevRevisionId && (charDiff !== 0 || slideDiff !== 0 || netImageCount !== prevImageCount)) {
+                  newLogs.push({
+                    name: student.name,
+                    timestamp: now.toISOString(),
+                    charCount: netCharCount,
+                    charDiff: charDiff,
+                    slideCount: stats.slideCount,
+                    imageCount: netImageCount,
+                    keywordCount: stats.keywordsUsed.length,
+                    copiedText: logSnippet
+                  });
+                }
+              } else {
+                // 2) Content unchanged during this tick
+                if (prevStatus === 'disconnected') {
+                  // Never interacted / no edit revisions -> stay disconnected
+                  nextStatus = 'disconnected';
+                } else {
+                  // Interacted in the past -> active or idle based on idle time
+                  const lastActiveTime = new Date(nextLastActive);
+                  const minutesIdle = (now.getTime() - lastActiveTime.getTime()) / (1000 * 60);
+
+                  if (minutesIdle >= 5) {
+                    if (prevStatus !== 'idle') {
+                      nextStatus = 'idle';
+                      stateChanged = true;
+                    }
+                  } else if (prevStatus === 'suspicious') {
+                    nextStatus = 'suspicious';
+                  } else {
+                    nextStatus = 'active';
+                  }
                 }
               }
+
+              const prevKwStr = (student.keywordsUsed || []).slice().sort().join(',');
+              const newKwStr = (stats.keywordsUsed || []).slice().sort().join(',');
+              const isKeywordsChanged = prevKwStr !== newKwStr;
+
+              if (
+                nextStatus !== prevStatus || 
+                netCharCount !== prevCharCount || 
+                stats.slideCount !== prevSlideCount || 
+                netImageCount !== prevImageCount ||
+                isKeywordsChanged
+              ) {
+                stateChanged = true;
+              }
+
+              let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
+              const accumulatedFocus = student.focusRatio || 100;
+              const currentTick = pollingTick + 1;
+              const nextFocusRatio = Math.round(((accumulatedFocus * (currentTick - 1)) + currentTickFocus) / currentTick);
+
+              student.charCount = netCharCount;
+              student.slideCount = stats.slideCount;
+              student.imageCount = netImageCount;
+              student.blankSlideCount = stats.blankSlideCount;
+              student.keywordsUsed = stats.keywordsUsed;
+              student.keywordCount = stats.keywordsUsed.length;
+              student.status = nextStatus;
+              student.lastActiveAt = nextLastActive;
+              student.focusRatio = nextFocusRatio;
+              
+              // Cache in memory for delta comparison on next tick
+              student.revisionId = stats.revisionId;
+              student.fullText = stats.fullText;
+
+            } catch (err) {
+              console.error(`Error polling slide for ${student.name}:`, err);
+              if (student.status !== 'disconnected' && !student.charCount) {
+                student.status = 'disconnected';
+                stateChanged = true;
+              }
             }
+          })
+        );
 
-            const prevKwStr = (student.keywordsUsed || []).slice().sort().join(',');
-            const newKwStr = (stats.keywordsUsed || []).slice().sort().join(',');
-            const isKeywordsChanged = prevKwStr !== newKwStr;
+        // 배치가 완료될 때마다 화면에 즉각 실시간 반영
+        setStudents([...updatedStudents]);
 
-            if (
-              nextStatus !== prevStatus || 
-              stats.charCount !== prevCharCount || 
-              stats.slideCount !== prevSlideCount || 
-              stats.imageCount !== prevImageCount ||
-              isKeywordsChanged
-            ) {
-              stateChanged = true;
-            }
-
-            let currentTickFocus = nextStatus === 'active' ? 100 : (nextStatus === 'idle' ? 30 : 0);
-            const accumulatedFocus = student.focusRatio || 100;
-            const currentTick = pollingTick + 1;
-            const nextFocusRatio = Math.round(((accumulatedFocus * (currentTick - 1)) + currentTickFocus) / currentTick);
-
-            student.charCount = stats.charCount;
-            student.slideCount = stats.slideCount;
-            student.imageCount = stats.imageCount;
-            student.blankSlideCount = stats.blankSlideCount;
-            student.keywordsUsed = stats.keywordsUsed;
-            student.keywordCount = stats.keywordsUsed.length;
-            student.status = nextStatus;
-            student.lastActiveAt = nextLastActive;
-            student.focusRatio = nextFocusRatio;
-            
-            // Cache in memory for delta comparison on next tick
-            student.revisionId = stats.revisionId;
-            student.fullText = stats.fullText;
-
-          } catch (err) {
-            console.error(`Error polling slide for ${student.name}:`, err);
-            if (student.status !== 'disconnected' && !student.charCount) {
-              student.status = 'disconnected';
-              stateChanged = true;
-            }
-          }
-        })
-      );
-      // 배치가 완료될 때마다 화면에 즉각 실시간 반영
-      setStudents([...updatedStudents]);
-    }
-
-    if (stateChanged || newLogs.length > 0) {
-      setStudents(updatedStudents);
-      setLastPollTime(now);
-      
-      try {
-        await saveStudentsStatus(spreadsheetId, updatedStudents);
-        if (newLogs.length > 0) {
-          setLogs(prev => [...prev, ...newLogs]);
-          await appendActivityLogs(spreadsheetId, newLogs);
+        // 청크 간 200ms 대기로 구글 API 버스트 호출 완화
+        if (i + CONCURRENCY < updatedStudents.length) {
+          await new Promise(res => setTimeout(res, 200));
         }
-      } catch (err) {
-        console.error('Error writing polling updates to Spreadsheet DB:', err);
       }
-    } else {
-      setLastPollTime(now);
+
+      if (stateChanged || newLogs.length > 0) {
+        setStudents(updatedStudents);
+        setLastPollTime(now);
+        
+        try {
+          await saveStudentsStatus(spreadsheetId, updatedStudents);
+          if (newLogs.length > 0) {
+            setLogs(prev => [...prev, ...newLogs]);
+            await appendActivityLogs(spreadsheetId, newLogs);
+          }
+        } catch (err) {
+          console.error('Error writing polling updates to Spreadsheet DB:', err);
+        }
+      } else {
+        setLastPollTime(now);
+      }
+    } finally {
+      isPollingBusyRef.current = false;
     }
   };
 
@@ -1668,16 +1763,16 @@ export default function Dashboard() {
                     <span style={{ fontWeight: 700 }}>{connectedCount} / {totalCount}명</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                    <span>학급 평균 글자 수</span>
-                    <span style={{ fontWeight: 700 }}>{avgChars}자</span>
+                    <span>평균 작성 글자 <small style={{ color: '#94a3b8', fontSize: '0.75rem' }}>(순수 추가)</small></span>
+                    <span style={{ fontWeight: 700 }}>+{avgChars}자</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
                     <span>평균 슬라이드 장수</span>
                     <span style={{ fontWeight: 700 }}>{avgSlides}장</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                    <span>평균 이미지 수</span>
-                    <span style={{ fontWeight: 700 }}>{avgImages}개</span>
+                    <span>평균 추가 이미지</span>
+                    <span style={{ fontWeight: 700 }}>+{avgImages}개</span>
                   </div>
                   {keywords.length > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
@@ -2074,8 +2169,8 @@ export default function Dashboard() {
                     
                     <div className="student-stats-row">
                       <span>{student.slideCount}장</span>
-                      <span>{student.charCount}자</span>
-                      <span>이미지 {student.imageCount}개</span>
+                      <span>+{student.charCount}자</span>
+                      <span>이미지 +{student.imageCount}개</span>
                     </div>
 
                     {/* 실시간 핵심 키워드 달성 현황 (깔끔하고 컴팩트한 일체형 스탯) */}
@@ -2318,8 +2413,8 @@ export default function Dashboard() {
                 {/* Key stats layout with Relative Deviation Badges */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
                   <div className="card" style={{ padding: '0.65rem 0.35rem', textAlign: 'center', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>글자 수</div>
-                    <strong style={{ fontSize: '1.1rem', margin: '0.15rem 0' }}>{activeStudent.charCount}자</strong>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>순수 작성 글자 <span style={{ fontSize: '0.65rem' }}>(공백제외)</span></div>
+                    <strong style={{ fontSize: '1.1rem', margin: '0.15rem 0' }}>+{activeStudent.charCount}자</strong>
                     {renderDeviationBadge(activeStudent.charCount - avgChars, '자')}
                   </div>
                   <div className="card" style={{ padding: '0.65rem 0.35rem', textAlign: 'center', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -2331,8 +2426,8 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className="card" style={{ padding: '0.65rem 0.35rem', textAlign: 'center', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>이미지</div>
-                    <strong style={{ fontSize: '1.1rem', margin: '0.15rem 0' }}>{activeStudent.imageCount}개</strong>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>추가 이미지</div>
+                    <strong style={{ fontSize: '1.1rem', margin: '0.15rem 0' }}>+{activeStudent.imageCount}개</strong>
                     {renderDeviationBadge(activeStudent.imageCount - Number(avgImages), '개')}
                   </div>
                 </div>
