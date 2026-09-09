@@ -9,7 +9,10 @@ import {
   fetchSlideStats, 
   saveStudentsStatus, 
   appendActivityLogs,
-  executeWithRetry
+  executeWithRetry,
+  fetchSlideComments,
+  postSlideComment,
+  postSlideReply
 } from '@/lib/googleApi';
 import MadeByStamp from '@/components/MadeByStamp';
 
@@ -322,6 +325,13 @@ export default function Dashboard() {
   const [chartSelectedDate, setChartSelectedDate] = useState('all');
   const [selectedPoint, setSelectedPoint] = useState(null);
   const [teacherFeedback, setTeacherFeedback] = useState('');
+  const [studentComments, setStudentComments] = useState([]);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isPostingComment, setIsPostingComment] = useState(false);
+  const [commentInput, setCommentInput] = useState('');
+  const [replyingCommentId, setReplyingCommentId] = useState(null);
+  const [replyInput, setReplyInput] = useState('');
+  const [isPostingReply, setIsPostingReply] = useState(false);
   const [isReportMode, setIsReportMode] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'idle', 'suspicious', 'active', 'disconnected'
@@ -1016,11 +1026,129 @@ export default function Dashboard() {
       setStudents(updated);
       await saveStudentsStatus(spreadsheetId, updated);
       setActiveStudent(prev => ({ ...prev, teacherFeedback }));
+      showAlert('피드백 메모가 구글 시트 DB에 저장되었습니다.', '저장 완료', 'success');
     } catch (err) {
       console.error(err);
-      alert('피드백을 저장하는데 실패했습니다.');
+      showAlert('피드백을 저장하는데 실패했습니다.', '오류', 'error');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 개별 학생의 구글 슬라이드 실시간 댓글 및 피드백 내역 로드 (직접 슬라이드에서 남긴 댓글 자동 반영)
+  const loadCommentsForActiveStudent = async (slideId, studentName = null) => {
+    if (!slideId) {
+      setStudentComments([]);
+      return;
+    }
+    setIsLoadingComments(true);
+    try {
+      const comments = await fetchSlideComments(slideId);
+      setStudentComments(comments);
+
+      // 교사가 구글 슬라이드에서 직접 남긴 댓글이 있는 경우, 최신 댓글 내용을 학생 피드백 기록에 자동 반영
+      const currentStudentName = studentName || activeStudent?.name;
+      if (comments.length > 0 && currentStudentName) {
+        const latestComment = comments[0];
+        const latestText = latestComment.content ? latestComment.content.trim() : '';
+        if (latestText) {
+          setStudents(prev => {
+            const studentToUpdate = prev.find(s => s.name === currentStudentName);
+            if (studentToUpdate && studentToUpdate.teacherFeedback !== latestText) {
+              const updated = prev.map(s => s.name === currentStudentName ? { ...s, teacherFeedback: latestText } : s);
+              saveStudentsStatus(spreadsheetId, updated).catch(console.error);
+              return updated;
+            }
+            return prev;
+          });
+          setActiveStudent(prev => prev && prev.name === currentStudentName ? { ...prev, teacherFeedback: latestText } : prev);
+          setTeacherFeedback(latestText);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load slide comments:', err);
+    } finally {
+      setIsLoadingComments(false);
+    }
+  };
+
+  // 학생 상세 드로어가 열리거나 대상 학생이 변경될 때 슬라이드 댓글 목록 자동 조회
+  useEffect(() => {
+    if (activeStudent && activeStudent.slideId) {
+      setTeacherFeedback(activeStudent.teacherFeedback || '');
+      setCommentInput('');
+      loadCommentsForActiveStudent(activeStudent.slideId, activeStudent.name);
+    } else {
+      setStudentComments([]);
+    }
+  }, [activeStudent?.slideId]);
+
+  // 구글 슬라이드에 실시간 교사 피드백 댓글 원격 등록
+  const handlePostSlideComment = async () => {
+    if (!activeStudent || !activeStudent.slideId) return;
+    const text = commentInput.trim();
+    if (!text) {
+      showAlert('댓글 내용을 입력해 주세요.', '입력 확인', 'warning');
+      return;
+    }
+
+    setIsPostingComment(true);
+    try {
+      // 1) 구글 드라이브 Comments API로 슬라이드에 즉시 실시간 댓글 등록
+      const newComment = await postSlideComment(activeStudent.slideId, text);
+      
+      // 2) 로컬 댓글 목록에 즉시 추가
+      setStudentComments(prev => [newComment, ...prev]);
+      setCommentInput('');
+      setTeacherFeedback(text);
+
+      // 3) 구글 스프레드시트 DB 피드백 기록에도 자동 동기화 보존
+      const updated = students.map(s => {
+        if (s.name === activeStudent.name) {
+          return { ...s, teacherFeedback: text };
+        }
+        return s;
+      });
+      setStudents(updated);
+      setActiveStudent(prev => ({ ...prev, teacherFeedback: text }));
+      await saveStudentsStatus(spreadsheetId, updated);
+
+      showAlert('슬라이드에 실시간 댓글이 등록되었습니다!\n학생 화면에 선생님의 피드백 알림 말풍선이 전송되었습니다.', '댓글 전송 완료', 'success');
+    } catch (err) {
+      console.error('Failed to post slide comment:', err);
+      showAlert(`슬라이드 댓글 작성에 실패했습니다: ${err?.result?.error?.message || err?.message || err}`, '댓글 오류', 'error');
+    } finally {
+      setIsPostingComment(false);
+    }
+  };
+
+  // 특정 댓글에 실시간 답글(Reply) 등록
+  const handlePostSlideReply = async (commentId) => {
+    if (!activeStudent || !activeStudent.slideId || !commentId) return;
+    const text = replyInput.trim();
+    if (!text) {
+      showAlert('답글 내용을 입력해 주세요.', '입력 확인', 'warning');
+      return;
+    }
+
+    setIsPostingReply(true);
+    try {
+      const newReply = await postSlideReply(activeStudent.slideId, commentId, text);
+      setStudentComments(prev => prev.map(c => {
+        if (c.id === commentId) {
+          const prevReplies = c.replies || [];
+          return { ...c, replies: [...prevReplies, newReply] };
+        }
+        return c;
+      }));
+      setReplyingCommentId(null);
+      setReplyInput('');
+      showAlert('답글이 슬라이드에 성공적으로 등록되었습니다!', '답글 전송 완료', 'success');
+    } catch (err) {
+      console.error('Failed to post reply:', err);
+      showAlert(`답글 작성에 실패했습니다: ${err?.result?.error?.message || err?.message || err}`, '오류', 'error');
+    } finally {
+      setIsPostingReply(false);
     }
   };
 
@@ -2726,30 +2854,259 @@ export default function Dashboard() {
                     );
                   })()}
                 </div>
+
+                {/* 💬 슬라이드 실시간 피드백 및 댓글 내역 (교사가 직접 슬라이드에 남긴 댓글 포함) */}
+                <div style={{ marginTop: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <h4 style={{ fontWeight: 800, fontSize: '0.88rem', color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      💬 슬라이드 댓글/피드백 내역 ({studentComments.length}건)
+                    </h4>
+                    <button 
+                      onClick={() => loadCommentsForActiveStudent(activeStudent.slideId, activeStudent.name)}
+                      disabled={isLoadingComments}
+                      style={{ 
+                        fontSize: '0.7rem', 
+                        fontWeight: 800, 
+                        color: 'var(--brand-green-dark)', 
+                        backgroundColor: 'var(--bg-light-green)', 
+                        border: '1px solid var(--border-light-green)', 
+                        borderRadius: '4px', 
+                        padding: '0.15rem 0.45rem', 
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.2rem'
+                      }}
+                    >
+                      {isLoadingComments ? '⏳ 로딩...' : '🔄 새로고침'}
+                    </button>
+                  </div>
+
+                  {isLoadingComments && studentComments.length === 0 ? (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>
+                      슬라이드 댓글을 불러오는 중...
+                    </div>
+                  ) : studentComments.length === 0 ? (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.85rem 0.5rem', backgroundColor: '#ffffff', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                      아직 슬라이드에 남겨진 댓글이 없습니다.<br />
+                      아래에서 댓글을 작성하면 학생 슬라이드에 즉시 실시간 알림이 전송됩니다.
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      maxHeight: '180px', 
+                      overflowY: 'auto', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.5rem',
+                      paddingRight: '0.2rem'
+                    }}>
+                      {studentComments.map((comment) => {
+                        const commentDate = new Date(comment.createdTime);
+                        const isToday = commentDate.toDateString() === new Date().toDateString();
+                        const timeStr = isToday
+                          ? commentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : `${commentDate.getMonth() + 1}/${commentDate.getDate()} ${commentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                        
+                        const authorName = comment.author?.displayName || '선생님';
+                        const isMe = comment.author?.me;
+
+                        return (
+                          <div 
+                            key={comment.id}
+                            style={{ 
+                              backgroundColor: '#ffffff', 
+                              border: '1px solid #e2e8f0', 
+                              borderRadius: '8px', 
+                              padding: '0.6rem 0.75rem',
+                              fontSize: '0.78rem',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                {comment.author?.photoLink ? (
+                                  <img src={comment.author.photoLink} alt={authorName} style={{ width: '16px', height: '16px', borderRadius: '50%' }} />
+                                ) : (
+                                  <span style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'var(--brand-green-dark)', color: 'white', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.55rem', fontWeight: 900 }}>
+                                    {authorName[0]}
+                                  </span>
+                                )}
+                                <strong style={{ color: '#1e293b', fontSize: '0.78rem' }}>
+                                  {authorName} {isMe && '(나)'}
+                                </strong>
+                                {comment.resolved && (
+                                  <span style={{ fontSize: '0.65rem', backgroundColor: '#ecfdf5', color: '#16a34a', padding: '0.05rem 0.3rem', borderRadius: '3px', fontWeight: 700 }}>
+                                    해결됨
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                                {timeStr}
+                              </span>
+                            </div>
+                            
+                            <div style={{ color: '#334155', lineHeight: '1.45', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: '0.15rem' }}>
+                              {comment.content}
+                            </div>
+
+                            {/* Nested replies from student or teacher */}
+                            <div style={{ marginTop: '0.45rem', borderTop: '1px solid #f1f5f9', paddingTop: '0.45rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                              {comment.replies && comment.replies.length > 0 && comment.replies.map((rep) => {
+                                const isRepMe = rep.author?.me;
+                                const repAuthorName = rep.author?.displayName || (isRepMe ? '선생님' : `${activeStudent.name}`);
+                                const repDate = new Date(rep.createdTime);
+                                const isRepToday = repDate.toDateString() === new Date().toDateString();
+                                const repTimeStr = isRepToday
+                                  ? repDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                  : `${repDate.getMonth() + 1}/${repDate.getDate()} ${repDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                                return (
+                                  <div 
+                                    key={rep.id} 
+                                    style={{ 
+                                      fontSize: '0.74rem', 
+                                      backgroundColor: isRepMe ? '#f0fdf4' : '#eff6ff', 
+                                      border: `1px solid ${isRepMe ? '#bbf7d0' : '#bfdbfe'}`,
+                                      borderLeft: `3px solid ${isRepMe ? '#16a34a' : '#2563eb'}`,
+                                      padding: '0.45rem 0.6rem', 
+                                      borderRadius: '6px' 
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                        <span style={{ 
+                                          fontSize: '0.65rem', 
+                                          fontWeight: 800, 
+                                          padding: '0.05rem 0.35rem', 
+                                          borderRadius: '4px',
+                                          backgroundColor: isRepMe ? '#dcfce7' : '#dbeafe',
+                                          color: isRepMe ? '#15803d' : '#1e40af'
+                                        }}>
+                                          {isRepMe ? '👨‍🏫 선생님 답글' : '👨‍🎓 학생 답글'}
+                                        </span>
+                                        <strong style={{ color: '#1e293b', fontSize: '0.75rem' }}>{repAuthorName}</strong>
+                                      </div>
+                                      <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{repTimeStr}</span>
+                                    </div>
+                                    <div style={{ color: '#1e293b', lineHeight: '1.45', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                      {rep.content}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Inline reply button & input */}
+                              {replyingCommentId === comment.id ? (
+                                <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', backgroundColor: '#f8fafc', padding: '0.45rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                  <input 
+                                    type="text"
+                                    placeholder="이 댓글에 대한 답글을 입력하세요... (Enter 전송)"
+                                    value={replyInput}
+                                    onChange={(e) => setReplyInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handlePostSlideReply(comment.id);
+                                      }
+                                    }}
+                                    autoFocus
+                                    style={{ width: '100%', fontSize: '0.75rem', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                  />
+                                  <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end' }}>
+                                    <button 
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyingCommentId(null);
+                                        setReplyInput('');
+                                      }}
+                                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      취소
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handlePostSlideReply(comment.id)}
+                                      disabled={isPostingReply}
+                                      style={{ fontSize: '0.7rem', padding: '0.2rem 0.6rem', backgroundColor: 'var(--brand-green-dark)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}
+                                    >
+                                      {isPostingReply ? '전송 중...' : '답글 달기'}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.15rem' }}>
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      setReplyingCommentId(comment.id);
+                                      setReplyInput('');
+                                    }}
+                                    style={{ 
+                                      background: 'none', 
+                                      border: 'none', 
+                                      color: 'var(--brand-green-dark)', 
+                                      fontSize: '0.72rem', 
+                                      fontWeight: 800, 
+                                      cursor: 'pointer',
+                                      padding: '0.1rem 0.25rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.2rem'
+                                    }}
+                                  >
+                                    ↳ 답글 달기
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
               </div>
 
               {/* Fixed Bottom Action Panel */}
-              <div style={{ borderTop: '1px solid var(--border-card)', paddingTop: '1rem', marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'white' }}>
+              <div style={{ borderTop: '1px solid var(--border-card)', paddingTop: '0.85rem', marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'white' }}>
                 <div>
-                  <label style={{ fontWeight: 800, fontSize: '0.85rem', color: '#475569', display: 'block', marginBottom: '0.35rem' }}>
-                    교사 피드백 메모 (구글 시트에 동기화됨)
+                  <label style={{ fontWeight: 800, fontSize: '0.85rem', color: '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <span>💬 슬라이드에 실시간 피드백 댓글 달기</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--brand-green-dark)', fontWeight: 700 }}>학생 슬라이드에 실시간 알림 팝업</span>
                   </label>
                   <textarea 
                     className="horizontal-form-input" 
                     rows={2} 
-                    placeholder="학생에게 제공할 피드백이나 나이스 생활기록부 기재 요약본을 작성하세요."
-                    style={{ width: '100%', resize: 'none', fontSize: '0.82rem', padding: '0.5rem' }}
-                    value={teacherFeedback}
-                    onChange={(e) => setTeacherFeedback(e.target.value)}
+                    placeholder="학생 슬라이드에 실시간으로 전송할 피드백이나 질문을 입력하세요... (Ctrl+Enter 전송)"
+                    style={{ width: '100%', resize: 'none', fontSize: '0.82rem', padding: '0.55rem', borderRadius: '8px' }}
+                    value={commentInput}
+                    onChange={(e) => setCommentInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handlePostSlideComment();
+                      }
+                    }}
                   />
-                  <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.35rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem' }}>
                     <button 
                       className="btn-primary" 
-                      style={{ flex: 1, padding: '0.45rem', fontSize: '0.82rem', border: 'none', cursor: 'pointer' }}
-                      onClick={handleSaveFeedback}
-                      disabled={isLoading}
+                      style={{ 
+                        flex: 2, 
+                        padding: '0.55rem', 
+                        fontSize: '0.82rem', 
+                        border: 'none', 
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem'
+                      }}
+                      onClick={handlePostSlideComment}
+                      disabled={isPostingComment || isLoading}
                     >
-                      피드백 저장
+                      {isPostingComment ? '댓글 전송 중...' : '💬 슬라이드에 댓글 달기'}
                     </button>
                     <a 
                       href={activeStudent.slideUrl} 
@@ -2763,7 +3120,7 @@ export default function Dashboard() {
                         color: '#b91c1c', 
                         borderColor: '#fca5a5',
                         fontSize: '0.82rem',
-                        padding: '0.45rem'
+                        padding: '0.55rem'
                       }}
                     >
                       슬라이드 열기 ➔

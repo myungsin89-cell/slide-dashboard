@@ -949,3 +949,69 @@ export async function deleteAssignment(spreadsheetId) {
     resource: { trashed: true }
   });
 }
+
+/**
+ * 14. 개별 학생 슬라이드에 달린 실시간 댓글/피드백 목록 조회 (교사가 직접 슬라이드에 남긴 댓글 및 학생 답글 포함)
+ */
+export async function fetchSlideComments(slideId) {
+  if (!getAccessToken() || !slideId) return [];
+
+  try {
+    const response = await executeWithRetry(() =>
+      window.gapi.client.drive.comments.list({
+        fileId: slideId,
+        fields: 'comments(id, content, createdTime, modifiedTime, author(displayName, photoLink, me), htmlContent, resolved, replies(id, content, createdTime, author(displayName, photoLink, me)))',
+        pageSize: 50
+      })
+    );
+
+    const comments = response?.result?.comments || [];
+    return comments.sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime());
+  } catch (err) {
+    console.warn(`[GoogleAPI] Failed to fetch comments for slide ${slideId}:`, err);
+    return [];
+  }
+}
+
+/**
+ * 15. 개별 학생 슬라이드에 원격으로 실시간 교사 피드백 댓글 등록 (학생 슬라이드에 실시간 알림 팝업 전송)
+ */
+export async function postSlideComment(slideId, content) {
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
+  if (!slideId) throw new Error('슬라이드 ID가 유효하지 않습니다.');
+  if (!content || !content.trim()) throw new Error('댓글 내용을 입력해 주세요.');
+
+  const response = await executeWithRetry(() =>
+    window.gapi.client.drive.comments.create({
+      fileId: slideId,
+      fields: 'id, content, createdTime, author(displayName, photoLink, me), resolved',
+      resource: {
+        content: content.trim()
+      }
+    })
+  );
+
+  return response?.result;
+}
+
+/**
+ * 16. 특정 댓글에 실시간 답글(Reply) 등록
+ */
+export async function postSlideReply(slideId, commentId, content) {
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
+  if (!slideId || !commentId) throw new Error('슬라이드 또는 댓글 ID가 유효하지 않습니다.');
+  if (!content || !content.trim()) throw new Error('답글 내용을 입력해 주세요.');
+
+  const response = await executeWithRetry(() =>
+    window.gapi.client.drive.replies.create({
+      fileId: slideId,
+      commentId: commentId,
+      fields: 'id, content, createdTime, author(displayName, photoLink, me)',
+      resource: {
+        content: content.trim()
+      }
+    })
+  );
+
+  return response?.result;
+}
