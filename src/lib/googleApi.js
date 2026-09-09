@@ -1015,3 +1015,38 @@ export async function postSlideReply(slideId, commentId, content) {
 
   return response?.result;
 }
+
+/**
+ * 17. 슬라이드 댓글 삭제
+ */
+export async function deleteSlideComment(slideId, commentId) {
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
+  if (!slideId || !commentId) throw new Error('슬라이드 또는 댓글 ID가 유효하지 않습니다.');
+
+  await executeWithRetry(() =>
+    window.gapi.client.drive.comments.delete({
+      fileId: slideId,
+      commentId: commentId
+    })
+  );
+
+  return true;
+}
+
+/**
+ * 18. 슬라이드 댓글의 답글(Reply) 삭제
+ */
+export async function deleteSlideReply(slideId, commentId, replyId) {
+  if (!getAccessToken()) throw new Error('구글 로그인 인증이 필요합니다.');
+  if (!slideId || !commentId || !replyId) throw new Error('슬라이드 또는 댓글/답글 ID가 유효하지 않습니다.');
+
+  await executeWithRetry(() =>
+    window.gapi.client.drive.replies.delete({
+      fileId: slideId,
+      commentId: commentId,
+      replyId: replyId
+    })
+  );
+
+  return true;
+}

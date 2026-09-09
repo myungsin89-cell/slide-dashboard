@@ -12,7 +12,9 @@ import {
   executeWithRetry,
   fetchSlideComments,
   postSlideComment,
-  postSlideReply
+  postSlideReply,
+  deleteSlideComment,
+  deleteSlideReply
 } from '@/lib/googleApi';
 import MadeByStamp from '@/components/MadeByStamp';
 
@@ -1150,6 +1152,54 @@ export default function Dashboard() {
     } finally {
       setIsPostingReply(false);
     }
+  };
+
+  // 슬라이드 댓글 삭제
+  const handleDeleteSlideComment = (commentId) => {
+    if (!activeStudent || !activeStudent.slideId || !commentId) return;
+
+    showConfirm(
+      '이 댓글을 삭제하시겠습니까?\n\n구글 슬라이드에서도 완전히 삭제됩니다.',
+      '댓글 삭제',
+      async () => {
+        try {
+          await deleteSlideComment(activeStudent.slideId, commentId);
+          setStudentComments(prev => prev.filter(c => c.id !== commentId));
+          showAlert('댓글이 성공적으로 삭제되었습니다.', '삭제 완료', 'success');
+        } catch (err) {
+          console.error('Failed to delete comment:', err);
+          showAlert(`댓글 삭제에 실패했습니다: ${err?.result?.error?.message || err?.message || err}`, '오류', 'error');
+        }
+      }
+    );
+  };
+
+  // 슬라이드 답글 삭제
+  const handleDeleteSlideReply = (commentId, replyId) => {
+    if (!activeStudent || !activeStudent.slideId || !commentId || !replyId) return;
+
+    showConfirm(
+      '이 답글을 삭제하시겠습니까?\n\n구글 슬라이드에서도 완전히 삭제됩니다.',
+      '답글 삭제',
+      async () => {
+        try {
+          await deleteSlideReply(activeStudent.slideId, commentId, replyId);
+          setStudentComments(prev => prev.map(c => {
+            if (c.id === commentId) {
+              return {
+                ...c,
+                replies: (c.replies || []).filter(r => r.id !== replyId)
+              };
+            }
+            return c;
+          }));
+          showAlert('답글이 성공적으로 삭제되었습니다.', '삭제 완료', 'success');
+        } catch (err) {
+          console.error('Failed to delete reply:', err);
+          showAlert(`답글 삭제에 실패했습니다: ${err?.result?.error?.message || err?.message || err}`, '오류', 'error');
+        }
+      }
+    );
   };
 
   // Student Profile categorizer
@@ -2970,7 +3020,7 @@ export default function Dashboard() {
 
                 {/* 💬 슬라이드 실시간 피드백 및 댓글 내역 (교사가 직접 슬라이드에 남긴 댓글 포함) */}
                 <div style={{ marginTop: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.85rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                     <h4 style={{ fontWeight: 800, fontSize: '0.88rem', color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       💬 슬라이드 댓글/피드백 내역 ({studentComments.length}건)
                     </h4>
@@ -2993,6 +3043,9 @@ export default function Dashboard() {
                     >
                       {isLoadingComments ? '⏳ 로딩...' : '🔄 새로고침'}
                     </button>
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', gap: '0.25rem', backgroundColor: '#eff6ff', padding: '0.25rem 0.5rem', borderRadius: '5px', border: '1px solid #dbeafe' }}>
+                    <span>💡 <strong>구글 슬라이드 위치:</strong> 슬라이드 화면 우측 상단의 <strong>💬 [댓글 기록 열기]</strong> 아이콘(단축키 Ctrl+Alt+Shift+A)을 누르면 전송된 피드백을 실시간으로 확인할 수 있습니다.</span>
                   </div>
 
                   {isLoadingComments && studentComments.length === 0 ? (
@@ -3053,9 +3106,41 @@ export default function Dashboard() {
                                   </span>
                                 )}
                               </div>
-                              <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
-                                {timeStr}
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                                  {timeStr}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSlideComment(comment.id)}
+                                  title="댓글 삭제 (구글 슬라이드에서도 삭제)"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#94a3b8',
+                                    fontSize: '0.9rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    padding: '0 0.25rem',
+                                    borderRadius: '4px',
+                                    lineHeight: 1,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = '#ef4444';
+                                    e.currentTarget.style.backgroundColor = '#fee2e2';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = '#94a3b8';
+                                    e.currentTarget.style.backgroundColor = 'transparent';
+                                  }}
+                                >
+                                  &times;
+                                </button>
+                              </div>
                             </div>
                             
                             <div style={{ color: '#334155', lineHeight: '1.45', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: '0.15rem' }}>
@@ -3099,7 +3184,39 @@ export default function Dashboard() {
                                         </span>
                                         <strong style={{ color: '#1e293b', fontSize: '0.75rem' }}>{repAuthorName}</strong>
                                       </div>
-                                      <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{repTimeStr}</span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{repTimeStr}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteSlideReply(comment.id, rep.id)}
+                                          title="답글 삭제 (구글 슬라이드에서도 삭제)"
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: '#94a3b8',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            padding: '0 0.2rem',
+                                            borderRadius: '4px',
+                                            lineHeight: 1,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            transition: 'all 0.15s ease'
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            e.currentTarget.style.color = '#ef4444';
+                                            e.currentTarget.style.backgroundColor = '#fee2e2';
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            e.currentTarget.style.color = '#94a3b8';
+                                            e.currentTarget.style.backgroundColor = 'transparent';
+                                          }}
+                                        >
+                                          &times;
+                                        </button>
+                                      </div>
                                     </div>
                                     <div style={{ color: '#1e293b', lineHeight: '1.45', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                                       {rep.content}
