@@ -2603,7 +2603,7 @@ export default function Dashboard() {
                       <div style={{ display: 'flex', gap: '0.25rem', overflowX: 'auto', paddingBottom: '0.35rem', marginBottom: '0.35rem' }}>
                         <button
                           type="button"
-                          onClick={() => setChartSelectedDate('all')}
+                          onClick={() => { setChartSelectedDate('all'); setSelectedPoint(null); }}
                           style={{
                             padding: '0.15rem 0.45rem',
                             fontSize: '0.68rem',
@@ -2622,7 +2622,7 @@ export default function Dashboard() {
                           <button
                             type="button"
                             key={dKey}
-                            onClick={() => setChartSelectedDate(dKey)}
+                            onClick={() => { setChartSelectedDate(dKey); setSelectedPoint(null); }}
                             style={{
                               padding: '0.15rem 0.45rem',
                               fontSize: '0.68rem',
@@ -2635,14 +2635,127 @@ export default function Dashboard() {
                               whiteSpace: 'nowrap'
                             }}
                           >
-                            {dKey}
+                            {dKey} ({dateGroupMap[dKey].length}건)
                           </button>
                         ))}
                       </div>
                     );
                   })()}
 
-                  {renderSVGChart(activeStudent.name, false, null, null, 'all', chartSelectedDate, setChartSelectedDate)}
+                  {renderSVGChart(activeStudent.name, false, setSelectedPoint, selectedPoint?.timestamp, 'all', chartSelectedDate, setChartSelectedDate)}
+
+                  {/* Drawer: Date-filtered Activity Log Breakdown directly below chart */}
+                  {(() => {
+                    const studentLogs = logs
+                      .filter(l => l.name === activeStudent.name)
+                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                    const dateFilteredLogs = chartSelectedDate === 'all'
+                      ? studentLogs
+                      : studentLogs.filter(l => {
+                          const dStr = new Date(l.timestamp).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' });
+                          return dStr === chartSelectedDate;
+                        });
+
+                    return (
+                      <div style={{ marginTop: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.6rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#334155', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            📋 {chartSelectedDate === 'all' ? '전체 기간 활동' : `[${chartSelectedDate}] 당일 활동`} ({dateFilteredLogs.length}건)
+                          </span>
+                          {chartSelectedDate !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => { setChartSelectedDate('all'); setSelectedPoint(null); }}
+                              style={{
+                                fontSize: '0.68rem',
+                                color: '#2563eb',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: 0
+                              }}
+                            >
+                              전체 보기
+                            </button>
+                          )}
+                        </div>
+
+                        {dateFilteredLogs.length === 0 ? (
+                          <div style={{ fontSize: '0.73rem', color: '#94a3b8', padding: '0.5rem', textAlign: 'center' }}>
+                            해당 일자에 기록된 활동 로그가 없습니다.
+                          </div>
+                        ) : (
+                          <div style={{
+                            maxHeight: '150px',
+                            overflowY: 'auto',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.35rem',
+                            paddingRight: '0.15rem'
+                          }}>
+                            {dateFilteredLogs.map((log, idx) => {
+                              const logDate = new Date(log.timestamp);
+                              const isSelected = selectedPoint?.timestamp === log.timestamp;
+                              const timeStr = chartSelectedDate === 'all'
+                                ? `${logDate.getMonth() + 1}/${logDate.getDate()} ${logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                                : logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                              const diff = log.charDiff !== undefined ? log.charDiff : 0;
+                              const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
+                              const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
+
+                              let rawText = log.copiedText || '';
+                              rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
+                              rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                              rawText = rawText.replace(/오프라인 대량 입력 감지/g, '슬라이드 본문 작성');
+                              rawText = rawText.replace(/교사\s*부재중\s*/g, '');
+                              rawText = rawText.replace(/오프라인\s*/g, '');
+
+                              const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && !rawText.startsWith('[슬라이드]') && !rawText.startsWith('[시각화]') && !rawText.startsWith('[수정]') && diff >= 180);
+
+                              let cleanSnippet = rawText.replace(/^\[(추가|작성|편집|수정)\]\s*/, '').trim();
+
+                              return (
+                                <div 
+                                  key={idx} 
+                                  onClick={() => setSelectedPoint(log)}
+                                  style={{ 
+                                    padding: '0.4rem 0.55rem', 
+                                    backgroundColor: isSelected ? '#eff6ff' : (isSuspicious ? '#fff5f5' : 'white'), 
+                                    border: isSelected ? '1.5px solid #2563eb' : `1px solid ${isSuspicious ? '#fca5a5' : '#e2e8f0'}`, 
+                                    borderRadius: '5px',
+                                    fontSize: '0.72rem',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, marginBottom: '0.15rem' }}>
+                                    <span style={{ color: '#475569' }}>⏰ {timeStr}</span>
+                                    <span style={{ color: diffColor }}>
+                                      {isSuspicious ? '⚠️ 복붙의심 ' : ''}{diff !== 0 ? `✍️ ${diffSign}자` : '🎨 서식 수정'} ({log.charCount}자)
+                                    </span>
+                                  </div>
+                                  <div style={{ 
+                                    color: isSuspicious ? '#b91c1c' : '#334155', 
+                                    wordBreak: 'break-all',
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.7rem',
+                                    lineHeight: '1.35',
+                                    maxHeight: '40px',
+                                    overflowY: 'hidden'
+                                  }}>
+                                    {cleanSnippet || '슬라이드 레이아웃 조작 또는 서식 편집'}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Target Keywords tracking checklist */}
@@ -3448,11 +3561,11 @@ export default function Dashboard() {
                 {renderSVGChart(activeStudent.name, true, setSelectedPoint, selectedPoint?.timestamp, chartTimeFilter, chartSelectedDate, setChartSelectedDate)}
               </div>
 
-              {/* 2nd Tier: Dynamic detail mapping card for the clicked node */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#334155' }}>선택한 시점의 작성 내용 매핑</span>
+              {/* 2nd Tier: Dynamic detail mapping card for the clicked node + Comprehensive Date-filtered Activity Breakdown */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 
-                {selectedPoint ? (() => {
+                {/* 1) Point Inspector Card (Active when a specific summit dot or list item is clicked) */}
+                {selectedPoint && (() => {
                   const diff = selectedPoint.charDiff !== undefined ? selectedPoint.charDiff : 0;
                   const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
                   const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
@@ -3474,30 +3587,53 @@ export default function Dashboard() {
 
                   return (
                     <div style={{ 
-                      padding: '1.25rem', 
-                      backgroundColor: isSuspicious ? '#fff5f5' : '#f0fdf4', 
-                      border: `1px solid ${isSuspicious ? '#fca5a5' : 'var(--border-light-green)'}`, 
+                      padding: '1.1rem 1.25rem', 
+                      backgroundColor: isSuspicious ? '#fff5f5' : '#eff6ff', 
+                      border: `2px solid ${isSuspicious ? '#f87171' : '#3b82f6'}`, 
                       borderRadius: '10px',
-                      boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
+                      boxShadow: '0 4px 10px -2px rgba(37, 99, 235, 0.12)',
                       animation: 'fadeIn 0.2s ease-out'
                     }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '0.88rem', borderBottom: '1px dashed #cbd5e1', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
-                        <span style={{ color: '#475569' }}>감지 시각: {new Date(selectedPoint.timestamp).toLocaleString()}</span>
-                        <span style={{ color: diffColor }}>
-                          변화량: {diff !== 0 ? `${diffSign}자` : '구조 수정'} (현재 누적 {selectedPoint.charCount}자)
-                        </span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 900, fontSize: '0.88rem', borderBottom: '1px dashed #cbd5e1', paddingBottom: '0.45rem', marginBottom: '0.65rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <span style={{ backgroundColor: isSuspicious ? '#ef4444' : '#2563eb', color: 'white', padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.72rem' }}>
+                            🎯 선택한 시점 정밀 분석
+                          </span>
+                          <span style={{ color: '#1e293b' }}>{new Date(selectedPoint.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <span style={{ color: diffColor }}>
+                            변화량: {diff !== 0 ? `${diffSign}자` : '구조 수정'} (누적 {selectedPoint.charCount}자)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPoint(null)}
+                            style={{
+                              padding: '0.15rem 0.45rem',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              color: '#64748b',
+                              backgroundColor: 'white',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '4px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            ✕ 선택 해제
+                          </button>
+                        </div>
                       </div>
                       
-                      <div style={{ fontSize: '0.85rem', color: '#1e293b' }}>
+                      <div style={{ fontSize: '0.83rem', color: '#1e293b' }}>
                         {isSuspicious ? (
-                          <div style={{ color: '#b91c1c', fontWeight: 800, marginBottom: '0.35rem' }}>[외부 텍스트 붙여넣기 의심 감지]</div>
+                          <div style={{ color: '#b91c1c', fontWeight: 800, marginBottom: '0.35rem' }}>⚠️ 외부 텍스트 붙여넣기 의심 감지</div>
                         ) : (
-                          <div style={{ color: 'var(--brand-green-dark)', fontWeight: 800, marginBottom: '0.35rem' }}>[직접 작성 내용]</div>
+                          <div style={{ color: '#2563eb', fontWeight: 800, marginBottom: '0.35rem' }}>✍️ 직접 작성 텍스트</div>
                         )}
                         <div style={{ 
                           fontFamily: 'monospace', fontSize: '0.82rem', color: '#334155',
                           backgroundColor: 'white', padding: '0.75rem 1rem', borderRadius: '6px',
-                          border: `1px solid ${isSuspicious ? '#fee2e2' : '#dcfce7'}`, whiteSpace: 'pre-wrap', maxHeight: '140px', overflowY: 'auto',
+                          border: `1px solid ${isSuspicious ? '#fee2e2' : '#bfdbfe'}`, whiteSpace: 'pre-wrap', maxHeight: '120px', overflowY: 'auto',
                           lineHeight: '1.5', wordBreak: 'break-all'
                         }}>
                           {displaySnippet || '슬라이드 레이아웃 조작 또는 단순 슬라이드 순서 이동입니다. (작성 텍스트 없음)'}
@@ -3505,19 +3641,153 @@ export default function Dashboard() {
                       </div>
                     </div>
                   );
-                })() : (
-                  <div style={{ 
-                    padding: '1.5rem', 
-                    border: '2px dashed #cbd5e1', 
-                    borderRadius: '10px', 
-                    textAlign: 'center', 
-                    color: '#94a3b8', 
-                    fontSize: '0.82rem',
-                    backgroundColor: '#fafafa'
-                  }}>
-                    차트 위의 <strong>동그라미 점</strong>을 클릭하시면, 그 순간 학생이 입력했던 실제 상세 글자 내용이 이곳에 표시됩니다.
-                  </div>
-                )}
+                })()}
+
+                {/* 2) Comprehensive Date-filtered Activity Breakdown (Immediately visible for the selected date or all dates) */}
+                {(() => {
+                  const studentLogs = logs
+                    .filter(l => l.name === activeStudent.name)
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                  const dateFilteredLogs = chartSelectedDate === 'all'
+                    ? studentLogs
+                    : studentLogs.filter(l => {
+                        const dStr = new Date(l.timestamp).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' });
+                        return dStr === chartSelectedDate;
+                      });
+
+                  return (
+                    <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', paddingBottom: '0.5rem', borderBottom: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                          <span style={{ fontSize: '0.9rem', fontWeight: 900, color: '#1e293b' }}>
+                            📋 {chartSelectedDate === 'all' ? '전체 기간 탐구 활동 상세 내역' : `[${chartSelectedDate}] 당일 활동 상세 내역`}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#2563eb', backgroundColor: '#eff6ff', padding: '0.15rem 0.5rem', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
+                            총 {dateFilteredLogs.length}건의 작업 기록
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                          항목을 클릭하면 상단 그래프의 시점과 연동됩니다.
+                        </span>
+                      </div>
+
+                      {dateFilteredLogs.length === 0 ? (
+                        <div style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem 0', fontSize: '0.85rem' }}>
+                          선택하신 일자({chartSelectedDate})에 수집된 학생 활동 로그가 없습니다.
+                        </div>
+                      ) : (
+                        <div style={{
+                          maxHeight: '280px',
+                          overflowY: 'auto',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.5rem',
+                          paddingRight: '0.35rem'
+                        }}>
+                          {dateFilteredLogs.map((log, index) => {
+                            const logDate = new Date(log.timestamp);
+                            const isSelected = selectedPoint?.timestamp === log.timestamp;
+                            const timeStr = chartSelectedDate === 'all'
+                              ? `${logDate.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })} ${logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                              : logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                            const diff = log.charDiff !== undefined ? log.charDiff : 0;
+                            const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
+                            const diffColor = diff > 0 ? '#16a34a' : (diff < 0 ? '#ef4444' : '#64748b');
+
+                            let rawText = log.copiedText || '';
+                            rawText = rawText.replace(/교사 부재중 오프라인 작업 감지/g, '슬라이드 본문 작성');
+                            rawText = rawText.replace(/\[의심\]\s*오프라인 대량 입력 감지/g, '[작성] 슬라이드 본문 작성');
+                            rawText = rawText.replace(/오프라인 대량 입력 감지/g, '슬라이드 본문 작성');
+                            rawText = rawText.replace(/교사\s*부재중\s*/g, '');
+                            rawText = rawText.replace(/오프라인\s*/g, '');
+
+                            const isSuspicious = rawText.includes('[의심]') || (!rawText.startsWith('[추가]') && !rawText.startsWith('[작성]') && !rawText.startsWith('[편집]') && !rawText.startsWith('[슬라이드]') && !rawText.startsWith('[시각화]') && !rawText.startsWith('[수정]') && diff >= 180);
+
+                            let cleanSnippet = rawText.replace(/^\[(추가|작성|편집|수정)\]\s*/, '').trim();
+
+                            let actionBadge = '🎨 서식/슬라이드 편집';
+                            let actionBadgeColor = '#0284c7';
+                            let actionBadgeBg = '#f0f9ff';
+                            if (isSuspicious) {
+                              actionBadge = '⚠️ 복사 붙여넣기 의심';
+                              actionBadgeColor = '#dc2626';
+                              actionBadgeBg = '#fef2f2';
+                            } else if (diff > 0) {
+                              actionBadge = '✍️ 슬라이드 본문 작성';
+                              actionBadgeColor = '#16a34a';
+                              actionBadgeBg = '#f0fdf4';
+                            } else if (diff < 0) {
+                              actionBadge = '✂️ 텍스트 삭제/축소';
+                              actionBadgeColor = '#ea580c';
+                              actionBadgeBg = '#fff7ed';
+                            }
+
+                            return (
+                              <div
+                                key={index}
+                                onClick={() => setSelectedPoint(log)}
+                                style={{
+                                  padding: '0.65rem 0.85rem',
+                                  backgroundColor: isSelected ? '#eff6ff' : (isSuspicious ? '#fff5f5' : 'white'),
+                                  border: isSelected ? '2px solid #2563eb' : `1px solid ${isSuspicious ? '#fca5a5' : '#e2e8f0'}`,
+                                  borderRadius: '8px',
+                                  cursor: 'pointer',
+                                  boxShadow: isSelected ? '0 2px 6px rgba(37, 99, 235, 0.15)' : 'none',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ 
+                                      fontSize: '0.72rem', 
+                                      fontWeight: 800, 
+                                      color: actionBadgeColor, 
+                                      backgroundColor: actionBadgeBg, 
+                                      padding: '0.15rem 0.45rem', 
+                                      borderRadius: '4px',
+                                      border: `1px solid ${actionBadgeColor}33`
+                                    }}>
+                                      {actionBadge}
+                                    </span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#334155' }}>
+                                      ⏰ {timeStr}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem' }}>
+                                    <span style={{ fontWeight: 800, color: diffColor }}>
+                                      {diff !== 0 ? diffSign + '자' : '구조 수정'}
+                                    </span>
+                                    <span style={{ color: '#64748b', fontWeight: 600 }}>
+                                      (누적 {log.charCount}자{log.slideCount ? `, ${log.slideCount}장` : ''})
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div style={{
+                                  fontSize: '0.78rem',
+                                  color: isSuspicious ? '#b91c1c' : '#334155',
+                                  fontFamily: 'monospace',
+                                  backgroundColor: isSelected ? 'white' : (isSuspicious ? '#fff' : '#f8fafc'),
+                                  padding: '0.45rem 0.65rem',
+                                  borderRadius: '4px',
+                                  border: `1px solid ${isSelected ? '#bfdbfe' : (isSuspicious ? '#fee2e2' : '#f1f5f9')}`,
+                                  wordBreak: 'break-all',
+                                  lineHeight: '1.4',
+                                  maxHeight: '60px',
+                                  overflowY: 'auto'
+                                }}>
+                                  {cleanSnippet || '슬라이드 레이아웃 조작 또는 단순 슬라이드 순서 이동입니다. (작성 텍스트 없음)'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>
